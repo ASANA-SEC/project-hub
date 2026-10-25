@@ -10,10 +10,18 @@
  *   2. Run setup() once from the editor and approve the permissions.
  *   3. Deploy > New deployment > Web app: Execute as "Me", access "Anyone".
  *
- * The super admin is fixed in Core.gs (SUPER_ADMIN) and cannot be removed.
+ * Super admins are fixed in Core.gs (SUPER_ADMINS) and cannot be removed.
+ *
+ * Google Calendar: every item whose section has a Deadline column gets an event in the
+ * "Project Hub" calendar of the account that deploys this script. The item's editors,
+ * collaborators and named people are added as guests, so it shows in their own Google Calendar.
  */
 
 const CLIENT_ID = 'PASTE-YOUR-OAUTH-CLIENT-ID.apps.googleusercontent.com';
+const APP_URL = 'https://asana-sec.github.io/project-hub/';
+// false: guests are added quietly. true: Google also emails an invitation the first time.
+const SEND_INVITE_EMAILS = false;
+const TIMED_EVENT_MINUTES = 30;
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
@@ -23,6 +31,7 @@ const TABLES = {
   access: ['id', 'sectionId', 'userId', 'level', 'createdBy', 'createdAt', 'updatedAt'],
   items: ['id', 'sectionId', 'title', 'data', 'editors', 'collaborators', 'files', 'stageChangedAt', 'createdBy', 'createdAt', 'updatedAt'],
   comments: ['id', 'sectionId', 'itemId', 'kind', 'author', 'text', 'createdAt', 'updatedAt'],
+  calendar: ['id', 'eventId', 'updatedAt'], // id = item id
 };
 const JSON_COLS = ['fields', 'data', 'editors', 'collaborators', 'files'];
 const BOOL_COLS = ['active', 'archived'];
@@ -59,12 +68,27 @@ function setup() {
     props.setProperty('FOLDER_ID', DriveApp.createFolder('Project Hub — Files').getId());
   }
 
-  // Creates the super admin's account row.
-  Core.identify(sheetStore_(), Core.SUPER_ADMIN, '');
+  let calId = props.getProperty('CALENDAR_ID');
+  if (!calId || !CalendarApp.getCalendarById(calId)) {
+    const cal = CalendarApp.createCalendar('Project Hub', { summary: 'Deadlines from Project Hub. Edit items in the app, not here.', timeZone: Session.getScriptTimeZone() });
+    calId = cal.getId();
+    props.setProperty('CALENDAR_ID', calId);
+  }
 
-  Logger.log('Sheet:  ' + ss.getUrl());
-  Logger.log('Folder: ' + DriveApp.getFolderById(props.getProperty('FOLDER_ID')).getUrl());
-  Logger.log('Super admin: ' + Core.SUPER_ADMIN);
+  // Creates the super admins' account rows.
+  const store = sheetStore_();
+  Core.SUPER_ADMINS.forEach(function (email) { Core.identify(store, email, ''); });
+
+  Logger.log('Sheet:    ' + ss.getUrl());
+  Logger.log('Folder:   ' + DriveApp.getFolderById(props.getProperty('FOLDER_ID')).getUrl());
+  Logger.log('Calendar: Project Hub (' + calId + ')');
+  Logger.log('Super admins: ' + Core.SUPER_ADMINS.join(', '));
+}
+
+/** Run from the editor to rebuild every Google Calendar event (for example after changing many items). */
+function syncAllCalendar() {
+  const r = resyncCalendar_(sheetStore_(), null, 5 * 60 * 1000);
+  Logger.log('Synced ' + r.synced + ' items, ' + r.remaining + ' left. Run again if anything is left.');
 }
 
 // ---------------------------------------------------------------- HTTP
@@ -80,13 +104,126 @@ function doPost(e) {
     const run = function () {
       const store = sheetStore_();
       const me = Core.identify(store, ident.email, ident.name);
-      return Core.handle(store, me, req.action, req.payload || {});
+      if (req.action === 'calendar.resync') {
+        if (!me.isSuper) throw Core.fail('FORBIDDEN', 'Only a super admin can do this.');
+        return resyncCalendar_(store, null, 4 * 60 * 1000);
+      }
+      const result = Core.handle(store, me, req.action, req.payload || {});
+      try {
+        afterChange_(store, req.action, result);
+      } catch (calErr) {
+        // The change itself is saved; a calendar problem must not undo it.
+        console.error('Calendar sync failed: ' + calErr);
+      }
+      return result;
     };
     const data = READ_ONLY_ACTIONS.indexOf(req.action) >= 0 ? run() : withLock_(run);
     return json_({ ok: true, data: data });
   } catch (err) {
     return json_({ ok: false, code: err.code || 'ERROR', error: String(err.message || err) });
   }
+}
+
+// ---------------------------------------------------------------- Google Calendar
+
+function calendar_() {
+  const id = PropertiesService.getScriptProperties().getProperty('CALENDAR_ID');
+  return id ? CalendarApp.getCalendarById(id) : null;
+}
+
+function afterChange_(store, action, result) {
+  if (!calendar_()) return;
+  if (action === 'item.create' || action === 'item.update') syncItem_(store, result.item);
+  else if (action === 'item.remove') dropEvent_(store, result.id);
+  else if (action === 'section.update') resyncCalendar_(store, result.section.id, 90 * 1000);
+}
+
+/** Create, update or remove the Google Calendar event for one item. */
+function syncItem_(store, item) {
+  const cal = calendar_();
+  const s = store.all('sections').filter(function (x) { return x.id === item.sectionId; })[0];
+  const link = store.all('calendar').filter(function (r) { return r.id === item.id; })[0];
+  const due = s && !s.archived && s.fields.filter(function (f) { return f.due; })[0];
+  const v = due && item.data ? item.data[due.key] : '';
+  if (!v) {
+    if (link) dropEvent_(store, item.id);
+    return;
+  }
+
+  const users = {};
+  store.all('users').forEach(function (u) { if (u.active !== false) users[u.id] = u; });
+  const people = [].concat(item.editors || [], item.collaborators || []);
+  s.fields.forEach(function (f) { if (f.type === 'person' && item.data[f.key]) people.push(item.data[f.key]); });
+  const guests = people.filter(function (id, i) { return users[id] && people.indexOf(id) === i; });
+
+  const stageF = s.stageField && s.fields.filter(function (f) { return f.key === s.stageField; })[0];
+  const stage = stageF && (stageF.options || []).filter(function (o) { return o.value === item.data[s.stageField]; })[0];
+  const name = function (id) { return (users[id] && users[id].name) || id; };
+  const title = (stage && stage.done ? '✓ ' : '') + item.title + ' — ' + s.name;
+  const desc = [
+    s.name + (stage ? ' · ' + stage.label : ''),
+    (item.editors || []).length ? 'Editors: ' + item.editors.map(name).join(', ') : '',
+    (item.collaborators || []).length ? 'Collaborators: ' + item.collaborators.map(name).join(', ') : '',
+    '',
+    'Open in Project Hub: ' + APP_URL + '#item/' + item.id,
+  ].filter(function (x, i) { return x || i === 3; }).join('\n');
+
+  const tz = Session.getScriptTimeZone();
+  const allDay = !/T\d/.test(v);
+  const start = allDay ? Utilities.parseDate(v.slice(0, 10), tz, 'yyyy-MM-dd') : Utilities.parseDate(v.slice(0, 16), tz, "yyyy-MM-dd'T'HH:mm");
+  const end = new Date(start.getTime() + TIMED_EVENT_MINUTES * 60000);
+
+  let ev = null;
+  if (link) { try { ev = cal.getEventById(link.eventId); } catch (e) { ev = null; } }
+  if (!ev) {
+    const opts = { description: desc, guests: guests.join(','), sendInvites: SEND_INVITE_EMAILS };
+    ev = allDay ? cal.createAllDayEvent(title, start, opts) : cal.createEvent(title, start, end, opts);
+    ev.setGuestsCanModify(false);
+    ev.setGuestsCanInviteOthers(false);
+    const row = { id: item.id, eventId: ev.getId(), updatedAt: new Date().toISOString() };
+    if (link) store.save('calendar', row); else store.insert('calendar', row);
+    return;
+  }
+  ev.setTitle(title);
+  ev.setDescription(desc);
+  if (allDay) ev.setAllDayDate(start); else ev.setTime(start, end);
+  const current = ev.getGuestList().map(function (g) { return g.getEmail().toLowerCase(); });
+  guests.forEach(function (g) { if (current.indexOf(g) < 0) ev.addGuest(g); });
+  current.forEach(function (g) { if (guests.indexOf(g) < 0) ev.removeGuest(g); });
+  link.updatedAt = new Date().toISOString();
+  store.save('calendar', link);
+}
+
+function dropEvent_(store, itemId) {
+  const link = store.all('calendar').filter(function (r) { return r.id === itemId; })[0];
+  if (!link) return;
+  try {
+    const ev = calendar_().getEventById(link.eventId);
+    if (ev) ev.deleteEvent();
+  } catch (e) {
+    // Already gone from the calendar.
+  }
+  store.del('calendar', itemId);
+}
+
+/** Sync many items within a time budget; returns how many were done and how many are left. */
+function resyncCalendar_(store, sectionId, budgetMs) {
+  if (!calendar_()) throw Core.fail('SETUP', 'Run setup() in the Apps Script editor first, so the Project Hub calendar exists.');
+  const startAt = Date.now();
+  const items = store.all('items').filter(function (it) { return !sectionId || it.sectionId === sectionId; });
+  let done = 0;
+  for (let i = 0; i < items.length; i++) {
+    if (Date.now() - startAt > budgetMs) break;
+    try { syncItem_(store, items[i]); } catch (e) { console.error('Calendar sync failed for ' + items[i].id + ': ' + e); }
+    done++;
+  }
+  // Events whose item no longer exists
+  if (!sectionId && done === items.length) {
+    const ids = {};
+    items.forEach(function (it) { ids[it.id] = true; });
+    store.all('calendar').forEach(function (r) { if (!ids[r.id]) dropEvent_(store, r.id); });
+  }
+  return { synced: done, remaining: items.length - done };
 }
 
 // ---------------------------------------------------------------- Google sign-in check

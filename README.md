@@ -3,11 +3,25 @@
 仿 Asana，专为建筑 / 工程公司做。所有模块（Section）和栏位都能在线上新增、修改：
 
 - **登录页**：只有 Super admin 开过账号的 Google 账号才能进
-- **Super admin**：`sam.secov@gmail.com`，什么都能做，写死在后端，不能被删除或降级
+- **Super admin（3 位）**：`sam.secov@gmail.com`、`szesian.mitosc@gmail.com`、`eileen.secov@gmail.com`，什么都能做，写死在后端，不能被删除或降级
 - **Section**：Super admin 可以新增、改名、排序、移除、恢复（预设 RFQ & Tender、Projects、Project Tasks、Payment & Claims）
 - **栏位模板**：Super admin 和该 Section 的 Manager 可以新增、删除、改名、改类型、调整下拉选项
 - **权限**：每个人在每个 Section 各自设定权限；Dashboard 只显示他有权限的 Section
 - **每个 task** 可以指定多个 Editors 和 Collaborators
+- **筛选和排序**：每个 Section 都可以按任何栏位筛选（可以叠加多个条件）、排序，会记住每个人的设定
+- **日历**：平台内有月、周、议程三种视图；有截止日期的 task 也会自动出现在相关同事自己的 Google Calendar 里
+
+## 日历与监看
+
+- 日期来源：每个 Section 里勾了「Deadline」的那个栏位。有时间的显示时间，只有日期的显示成全天
+- **一般用户**：只看自己的日历（自己担任 Editor、Collaborator 或被指定为负责人的 task）
+- **Section Manager**：可以切换查看自己管理的 Section 里每个成员的日历（只限这些 Section 的 task），名单里不会有 Super admin
+- **Super admin**：可以查看所有人的日历
+
+**Google Calendar 同步**：后端会在部署者（Sam）的 Google 账号里建一个「Project Hub」日历。每个有截止日期的 task 是一个活动，相关的人是宾客，所以活动会出现在他们自己的 Google Calendar。task 改名、改日期、改人、删除时会自动更新，活动里也附有回到平台的链接。
+
+- 预设不寄邀请 email（`Code.gs` 里的 `SEND_INVITE_EMAILS = false`）。如果有同事看不到活动，请他在 Google Calendar 设定 →「活动设定」→「添加邀请」选「所有人」；或者把 `SEND_INVITE_EMAILS` 改成 `true`，让 Google 第一次寄邀请给他接受
+- 一次改了很多资料后，Super admin 可以在 Calendar 页面按「Re-sync Google Calendar」，全部重新同步
 
 ```
 GitHub Pages（网页） ──Google 登录凭证──▶ Google Apps Script（Code.gs + Core.gs） ──▶ Google Sheets（数据）
@@ -68,8 +82,8 @@ GitHub Pages（网页） ──Google 登录凭证──▶ Google Apps Script�
    const CLIENT_ID = '第 1 部分复制的 Client ID';
    ```
 5. 左侧 ⚙️ **Project Settings** → Time zone 选 `(GMT+08:00) Kuala Lumpur`
-6. 回到 `Code.gs`，上方函数选单选 **setup** → 按 **Run** → 按提示授权（Google 会警告「未验证的应用」，按 Advanced → Go to Project Hub API）
-   - 跑完后 Execution log 会显示新建的 **Google Sheet** 和 **Drive 文件夹**网址
+6. 回到 `Code.gs`，上方函数选单选 **setup** → 按 **Run** → 按提示授权（Google 会警告「未验证的应用」，按 Advanced → Go to Project Hub API）。授权项目包括 Sheets、Drive 和 Calendar
+   - 跑完后 Execution log 会显示新建的 **Google Sheet**、**Drive 文件夹**和 **Project Hub 日历**
 7. 右上 **Deploy → New deployment**
    - 齿轮选 **Web app**
    - Execute as：**Me**

@@ -4,7 +4,7 @@
 (function () {
   'use strict';
   const CFG = window.APP_CONFIG || {};
-  const DEMO_KEY = 'projecthub_demo_v2';
+  const DEMO_KEY = 'projecthub_demo_v3';
   const DEMO_USER = 'projecthub_demo_user';
   const clone = (o) => JSON.parse(JSON.stringify(o));
 
@@ -62,6 +62,8 @@
 
   const DEMO_ACCOUNTS = {
     'sam.secov@gmail.com': 'Super admin — everything, including accounts, access and sections',
+    'szesian.mitosc@gmail.com': 'Super admin',
+    'eileen.secov@gmail.com': 'Super admin',
     'ali@example.com': 'Projects: Manager · Project Tasks: Editor · Payment & Claims: Contributor',
     'nurul@example.com': 'RFQ & Tender: Editor',
     'meiling@example.com': 'Projects: Viewer · Project Tasks: Contributor · collaborator on one RFQ',
@@ -72,7 +74,7 @@
   function seed() {
     const SAM = 'sam.secov@gmail.com';
     const users = [
-      ['sam.secov@gmail.com', 'Sam'], ['ali@example.com', 'Ali (PM)'], ['nurul@example.com', 'Nurul (Tender)'],
+      ['sam.secov@gmail.com', 'Sam'], ['szesian.mitosc@gmail.com', 'Sze Sian'], ['eileen.secov@gmail.com', 'Eileen'], ['ali@example.com', 'Ali (PM)'], ['nurul@example.com', 'Nurul (Tender)'],
       ['meiling@example.com', 'Mei Ling (PM)'], ['siti@example.com', 'Siti (Finance)'], ['raj@example.com', 'Raj (Site)'],
     ].map(([id, name]) => ({ id, name, active: true, createdBy: SAM, createdAt: stamp(-60), updatedAt: stamp(-60) }));
 

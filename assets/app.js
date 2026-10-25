@@ -27,7 +27,7 @@
   const S = {
     me: null, users: [], sections: [], items: [], comments: [], access: [],
     loaded: false, drawer: null, tpl: null,
-    f: { q: '', who: 'all', view: {} },
+    f: { q: '', who: 'all', view: {}, cal: { who: 'me', section: 'all', view: window.innerWidth < 760 ? 'agenda' : 'month', anchor: '' } },
   };
   try { S.f.view = JSON.parse(localStorage.getItem('projecthub_views') || '{}') || {}; } catch (e) { /* storage blocked */ }
 
@@ -300,6 +300,7 @@
   const ICON = {
     dashboard: '<path d="M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 3v6h8V3z"/>',
     mywork: '<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/>',
+    calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
     sections: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M17.5 14v7M14 17.5h7"/>',
     team: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6"/>',
   };
@@ -324,7 +325,7 @@
   function renderNav(active) {
     const late = S.items.filter((it) => { const s = sectionOf(it); if (!s || !involved(it)) return false; const d = dueInfo(s, it); return d && d.sev === 2; }).length;
     const link = (href, key, label, icon, count) => `<a href="${href}" data-nav="${key}">${icon}<span class="lbl">${label}</span>${count ? `<span class="count">${count}</span>` : ''}</a>`;
-    let html = link('#dashboard', 'dashboard', 'Dashboard', svg('dashboard')) + link('#mywork', 'mywork', 'My Work', svg('mywork'), late);
+    let html = link('#dashboard', 'dashboard', 'Dashboard', svg('dashboard')) + link('#mywork', 'mywork', 'My Work', svg('mywork'), late) + link('#calendar', 'calendar', 'Calendar', svg('calendar'));
     const secs = liveSections();
     if (secs.length) html += '<div class="nav-h">Sections</div>' + secs.map((s) => link('#s/' + s.id, 's/' + s.id, esc(s.name), secMark(s))).join('');
     if (S.me.isSuper) html += '<div class="nav-h">Super admin</div>' + link('#sections', 'sections', 'Manage sections', svg('sections')) + link('#team', 'team', 'Users &amp; access', svg('team'));
@@ -353,7 +354,8 @@
     let title = 'Dashboard';
     if (r.view === 's' && r.sub === 'customize') { html = viewCustomize(r.id); nav = 's/' + r.id; title = 'Customize'; }
     else if (r.view === 's') { html = viewSection(r.id); nav = 's/' + r.id; title = (section(r.id) || {}).name || 'Section'; }
-    else if (r.view === 'mywork') { html = viewMyWork(); title = 'My Work'; }
+    else if (r.view === 'mywork' || r.view === 'item') { html = viewMyWork(); nav = 'mywork'; title = 'My Work'; }
+    else if (r.view === 'calendar') { html = viewCalendar(); title = 'Calendar'; }
     else if (r.view === 'sections') { html = viewSections(); title = 'Manage sections'; }
     else if (r.view === 'team') { html = viewTeam(); title = 'Users & access'; }
     else { html = viewDashboard(); nav = 'dashboard'; }
@@ -367,6 +369,135 @@
     if (S._last === location.hash) window.scrollTo(0, keepTop);
     S._last = location.hash;
     document.title = title + ' · Project Hub';
+    // Links from Google Calendar events open the item directly: #item/<id>
+    if (r.view === 'item' && r.id && S._deepLinked !== r.id) {
+      S._deepLinked = r.id;
+      history.replaceState(null, '', '#mywork');
+      openItem(r.id);
+    }
+  }
+
+  // ------------------------------------------------------------ calendar
+
+  const userOn = (it, uid) => (it.editors || []).includes(uid) || (it.collaborators || []).includes(uid) ||
+    (sectionOf(it) ? sectionOf(it).fields.some((f) => f.type === 'person' && val(it, f) === uid) : false);
+  const managed = () => liveSections().filter((s) => myLevel(s) === 'manager').map((s) => s.id);
+
+  function calOptions() {
+    const mon = Core.monitorable(ctx(), S.sections, S.items, S.users);
+    const opts = [{ value: 'me', label: 'My calendar' }];
+    if (S.me.isSuper) opts.push({ value: 'team', label: 'Everyone' });
+    else if (managed().length) opts.push({ value: 'team', label: 'Everyone in the sections I manage' });
+    S.users.filter((u) => u.id !== S.me.id && mon[u.id]).sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
+      .forEach((u) => opts.push({ value: u.id, label: u.name || u.id }));
+    return { opts, mon };
+  }
+
+  function calEntries() {
+    const c = S.f.cal;
+    const { mon } = calOptions();
+    let items;
+    if (c.who === 'team' && (S.me.isSuper || managed().length)) {
+      const ids = managed();
+      items = S.items.filter((it) => S.me.isSuper || ids.includes(it.sectionId));
+    } else if (c.who !== 'me' && mon[c.who]) {
+      const scope = mon[c.who];
+      items = S.items.filter((it) => userOn(it, c.who) && (scope === '*' || scope.includes(it.sectionId)));
+    } else {
+      items = S.items.filter((it) => userOn(it, S.me.id));
+    }
+    return items.map((it) => {
+      const s = sectionOf(it);
+      if (!s || s.archived || (c.section !== 'all' && s.id !== c.section)) return null;
+      const f = dueF(s);
+      const v = f && val(it, f);
+      if (!v) return null;
+      const d = dueInfo(s, it);
+      return { it, s, day: v.slice(0, 10), time: /T\d/.test(v) ? v.slice(11, 16) : '', done: isDone(s, it), late: !!(d && d.sev === 2) };
+    }).filter(Boolean).sort((a, b) => (a.day + (a.time || '00:00')).localeCompare(b.day + (b.time || '00:00')));
+  }
+
+  function evChip(e, full) {
+    return `<button type="button" class="ev${e.done ? ' done' : ''}${e.late ? ' late' : ''}" style="--h:${hue(e.s.id)}" data-act="open" data-id="${esc(e.it.id)}" title="${esc(e.s.name + ' · ' + e.it.title)}">
+      ${e.time ? `<span class="evt">${e.time}</span>` : ''}<span class="evn">${esc(e.it.title)}</span>${full ? `<span class="evs">${esc(e.s.name)}${(e.it.editors || []).length ? ' · ' + esc(e.it.editors.map(userName).join(', ')) : ''}</span>` : ''}</button>`;
+  }
+
+  function viewCalendar() {
+    const c = S.f.cal;
+    const { opts } = calOptions();
+    if (!opts.some((o) => o.value === c.who)) c.who = 'me';
+    const entries = calEntries();
+    const byDay = {};
+    entries.forEach((e) => { (byDay[e.day] = byDay[e.day] || []).push(e); });
+    const anchor = parseDay(c.anchor) || new Date();
+    const t = today();
+    let title = '';
+    let body = '';
+    const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const mondayOf = (d) => { const x = new Date(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
+
+    if (c.view === 'month') {
+      const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+      const start = mondayOf(first);
+      title = first.toLocaleString('en-MY', { month: 'long', year: 'numeric' });
+      let cells = '';
+      for (let i = 0; i < 42; i++) {
+        const d = new Date(start);
+        d.setDate(start.getDate() + i);
+        if (i >= 35 && d.getMonth() !== first.getMonth()) break;
+        const k = dayStr(d);
+        const list = byDay[k] || [];
+        cells += `<div class="cday${d.getMonth() !== first.getMonth() ? ' out' : ''}${k === t ? ' today' : ''}">
+          <button type="button" class="cnum" data-act="cal-day" data-day="${k}" aria-label="Show week of ${fmtDate(k)}">${d.getDate()}</button>
+          ${list.slice(0, 3).map((e) => evChip(e)).join('')}
+          ${list.length > 3 ? `<button type="button" class="more" data-act="cal-day" data-day="${k}">+${list.length - 3} more</button>` : ''}</div>`;
+      }
+      body = `<div class="cgrid"><div class="cdow">${DOW.map((x) => `<span>${x}</span>`).join('')}</div><div class="cdays">${cells}</div></div>`;
+    } else if (c.view === 'week') {
+      const start = mondayOf(anchor);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      title = fmtDate(dayStr(start)) + ' – ' + fmtDate(dayStr(end));
+      let cols = '';
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(start);
+        d.setDate(start.getDate() + i);
+        const k = dayStr(d);
+        const list = byDay[k] || [];
+        cols += `<div class="wday${k === t ? ' today' : ''}"><div class="wh"><b>${DOW[i]}</b> ${d.getDate()} ${MON[d.getMonth()]}</div>${list.map((e) => evChip(e, true)).join('') || '<div class="none">—</div>'}</div>`;
+      }
+      body = `<div class="cweek">${cols}</div>`;
+    } else {
+      title = 'From ' + fmtDate(dayStr(anchor));
+      const from = dayStr(anchor);
+      const overdue = from === t ? entries.filter((e) => e.late && e.day < t) : [];
+      const upcoming = entries.filter((e) => e.day >= from).slice(0, 150);
+      const days = [...new Set(upcoming.map((e) => e.day))];
+      body = `<div class="agenda">
+        ${overdue.length ? `<div class="aday"><div class="ah crit">Overdue · ${overdue.length}</div>${overdue.map((e) => evChip(e, true)).join('')}</div>` : ''}
+        ${days.map((k) => `<div class="aday"><div class="ah${k === t ? ' now' : ''}">${k === t ? 'Today · ' : ''}${fmtDate(k)}</div>${upcoming.filter((e) => e.day === k).map((e) => evChip(e, true)).join('')}</div>`).join('')}
+        ${!days.length && !overdue.length ? '<div class="empty-state"><b>Nothing scheduled</b>Items appear here when their deadline column has a date.</div>' : ''}</div>`;
+    }
+
+    const secs = liveSections().filter((s) => dueF(s));
+    const whoLabel = (opts.find((o) => o.value === c.who) || opts[0]).label;
+    const sync = API.mode === 'demo'
+      ? 'In the live version, every item with a deadline is also added to the Google Calendar of its editors, collaborators and named people.'
+      : 'Items with a deadline are also added to the Google Calendar of their editors, collaborators and named people, and update when the item changes.';
+    return `
+      <div class="head"><div><h1>Calendar</h1><div class="sub">${esc(whoLabel)} · ${entries.length} dated item${entries.length === 1 ? '' : 's'}${entries.filter((e) => e.late).length ? ` · <b style="color:var(--crit)">${entries.filter((e) => e.late).length} late</b>` : ''}</div></div>
+        ${S.me.isSuper && API.mode === 'remote' ? '<button class="btn" data-act="cal-resync">Re-sync Google Calendar</button>' : ''}</div>
+      <div class="banner info"><span>${sync}</span></div>
+      <div class="toolbar">
+        <div class="seg"><button type="button" data-act="cal-nav" data-dir="-1" aria-label="Previous">‹</button><button type="button" data-act="cal-nav" data-dir="0">Today</button><button type="button" data-act="cal-nav" data-dir="1" aria-label="Next">›</button></div>
+        <b class="ctitle">${esc(title)}</b>
+        <span class="grow"></span>
+        ${opts.length > 1 ? `<select data-cal="who" aria-label="Whose calendar">${opts.map((o) => `<option value="${esc(o.value)}"${o.value === c.who ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select>` : ''}
+        <select data-cal="section" aria-label="Section"><option value="all">All sections</option>${secs.map((s) => `<option value="${esc(s.id)}"${s.id === c.section ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+        <div class="seg" role="group" aria-label="View">${['month', 'week', 'agenda'].map((v) => `<button type="button" class="${c.view === v ? 'on' : ''}" data-act="cal-view" data-v="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}</div>
+      </div>
+      <div class="clegend">${secs.map((s) => `<span><i style="--h:${hue(s.id)}"></i>${esc(s.name)}</span>`).join('')}<span><i class="lg-late"></i>Late</span><span><i class="lg-done"></i>Done</span></div>
+      ${body}`;
   }
 
   function kpi(value, label, sub, cls) {
@@ -447,11 +578,179 @@
 
   // ------------------------------------------------------------ section
 
+  // ---- filter & sort (per person, per section; remembered in this browser)
+
+  const EXTRA_COLS = [
+    { key: '_editors', label: 'Editors', type: 'people' },
+    { key: '_collaborators', label: 'Collaborators', type: 'people' },
+    { key: '_updated', label: 'Last updated', type: 'datetime' },
+    { key: '_created', label: 'Created', type: 'datetime' },
+  ];
+  const OPS = {
+    text: [['contains', 'contains'], ['not_contains', 'does not contain'], ['is', 'is exactly'], ['empty', 'is empty'], ['not_empty', 'is not empty']],
+    number: [['eq', '='], ['gt', '>'], ['lt', '<'], ['gte', '≥'], ['lte', '≤'], ['empty', 'is empty'], ['not_empty', 'is not empty']],
+    date: [['on', 'is on'], ['before', 'is before'], ['after', 'is after'], ['overdue', 'is overdue'], ['today', 'is today'], ['next7', 'is in the next 7 days'], ['this_month', 'is this month'], ['empty', 'is empty'], ['not_empty', 'is not empty']],
+    select: [['is', 'is'], ['is_not', 'is not'], ['empty', 'is empty'], ['not_empty', 'is not empty']],
+    person: [['is', 'is'], ['is_not', 'is not'], ['is_me', 'is me'], ['empty', 'is empty'], ['not_empty', 'is not empty']],
+    people: [['has', 'includes'], ['has_me', 'includes me'], ['empty', 'is empty']],
+    checkbox: [['checked', 'is ticked'], ['unchecked', 'is not ticked']],
+    link: [['is', 'is'], ['empty', 'is empty'], ['not_empty', 'is not empty']],
+  };
+  const NO_VALUE = ['empty', 'not_empty', 'overdue', 'today', 'next7', 'this_month', 'is_me', 'has_me', 'checked', 'unchecked'];
+  const opGroup = (type) => ({ longtext: 'text', url: 'text', currency: 'number', percent: 'number', datetime: 'date' }[type] || type);
+
+  let secf = {};
+  try { secf = JSON.parse(localStorage.getItem('projecthub_filters') || '{}') || {}; } catch (e) { /* storage blocked */ }
+  function fstate(sid) { if (!secf[sid]) secf[sid] = { rules: [], sort: { key: '', dir: 'asc' }, open: false }; return secf[sid]; }
+  function saveF() { try { localStorage.setItem('projecthub_filters', JSON.stringify(secf)); } catch (e) { /* blocked */ } }
+  const colsFor = (s) => s.fields.concat(EXTRA_COLS);
+  const colOf = (s, key) => colsFor(s).find((f) => f.key === key);
+  function fv(it, f) {
+    if (f.key === '_editors') return it.editors || [];
+    if (f.key === '_collaborators') return it.collaborators || [];
+    if (f.key === '_updated') return it.updatedAt || '';
+    if (f.key === '_created') return it.createdAt || '';
+    return val(it, f);
+  }
+  function dayKey(v) {
+    if (!v) return '';
+    return /Z$|[+-]\d\d:\d\d$/.test(v) || v.length > 16 ? dayStr(new Date(v)) : v.slice(0, 10);
+  }
+
+  function matches(s, it, r) {
+    const f = colOf(s, r.key);
+    if (!f) return true;
+    const v = fv(it, f);
+    const g = opGroup(f.type);
+    const isEmpty = Array.isArray(v) ? !v.length : blank(v) || v === false;
+    if (r.op === 'empty') return isEmpty;
+    if (r.op === 'not_empty') return !isEmpty;
+    switch (g) {
+      case 'text': {
+        const a = String(v || '').toLowerCase();
+        const b = String(r.value || '').toLowerCase();
+        if (r.op === 'contains') return a.includes(b);
+        if (r.op === 'not_contains') return !a.includes(b);
+        return a === b;
+      }
+      case 'number': {
+        if (isEmpty || blank(r.value)) return r.op !== 'eq' || blank(r.value);
+        const a = Number(v);
+        const b = Number(r.value);
+        return { eq: a === b, gt: a > b, lt: a < b, gte: a >= b, lte: a <= b }[r.op];
+      }
+      case 'date': {
+        if (isEmpty) return false;
+        const d = dayKey(v);
+        const t = today();
+        if (r.op === 'on') return !r.value || d === r.value;
+        if (r.op === 'before') return !r.value || d < r.value;
+        if (r.op === 'after') return !r.value || d > r.value;
+        if (r.op === 'today') return d === t;
+        if (r.op === 'next7') { const n = daysFromToday(d); return n >= 0 && n <= 7; }
+        if (r.op === 'this_month') return d.slice(0, 7) === t.slice(0, 7);
+        if (r.op === 'overdue') {
+          if (isDone(s, it)) return false;
+          return f.type === 'datetime' && !f.key.startsWith('_') ? hoursUntil(v) < 0 : d < t;
+        }
+        return true;
+      }
+      case 'select': case 'person': case 'link':
+        if (r.op === 'is_me') return v === S.me.id;
+        if (r.op === 'is_not') return v !== r.value;
+        return !r.value || v === r.value;
+      case 'people':
+        if (r.op === 'has_me') return v.includes(S.me.id);
+        return !r.value || v.includes(r.value);
+      case 'checkbox':
+        return r.op === 'checked' ? !!v : !v;
+      default:
+        return true;
+    }
+  }
+
+  function sortKey(s, it, f) {
+    const v = fv(it, f);
+    switch (opGroup(f.type)) {
+      case 'number': return blank(v) ? null : Number(v);
+      case 'date': return v ? (f.key.startsWith('_') ? v : String(v)) : null;
+      case 'select': { const i = (f.options || []).findIndex((o) => o.value === v); return i < 0 ? null : i; }
+      case 'person': return v ? userName(v).toLowerCase() : null;
+      case 'people': return v.length ? v.length : null;
+      case 'link': { const t = v && item(v); return t ? t.title.toLowerCase() : null; }
+      case 'checkbox': return v ? 0 : 1;
+      default: return blank(v) ? null : String(v).toLowerCase();
+    }
+  }
+
+  function sorter(s) {
+    const st = fstate(s.id).sort;
+    const f = st.key && colOf(s, st.key);
+    if (!f) return byDue;
+    const dir = st.dir === 'desc' ? -1 : 1;
+    return (a, b) => {
+      const x = sortKey(s, a, f);
+      const y = sortKey(s, b, f);
+      if (x === null && y === null) return 0;
+      if (x === null) return 1; // empty values always last
+      if (y === null) return -1;
+      return (x < y ? -1 : x > y ? 1 : 0) * dir;
+    };
+  }
+
   function sectionFilter(s) {
     const q = S.f.q.toLowerCase();
+    const rules = fstate(s.id).rules;
     return S.items.filter((it) => it.sectionId === s.id &&
       (S.f.who !== 'mine' || involved(it)) &&
-      (!q || [it.title].concat(s.fields.filter((f) => ['text', 'longtext', 'url'].includes(f.type)).map((f) => val(it, f))).join(' ').toLowerCase().includes(q)));
+      (!q || [it.title].concat(s.fields.filter((f) => ['text', 'longtext', 'url'].includes(f.type)).map((f) => val(it, f))).join(' ').toLowerCase().includes(q)) &&
+      rules.every((r) => matches(s, it, r)));
+  }
+
+  function filterPanel(s) {
+    const st = fstate(s.id);
+    if (!st.open && !st.rules.length) return '';
+    const cols = colsFor(s);
+    const valueInput = (r, i, f) => {
+      const g = opGroup(f.type);
+      const a = `data-fr="${i}" data-p="value" aria-label="Value"`;
+      if (NO_VALUE.includes(r.op)) return '';
+      if (g === 'text') return `<input type="text" ${a} value="${esc(r.value || '')}" placeholder="Type a value">`;
+      if (g === 'number') return `<input type="number" step="any" ${a} value="${esc(r.value || '')}">`;
+      if (g === 'date') return `<input type="date" ${a} value="${esc(r.value || '')}">`;
+      if (g === 'select') return `<select ${a}><option value="">Choose…</option>${(f.options || []).map((o) => `<option value="${esc(o.value)}"${o.value === r.value ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`;
+      if (g === 'person' || g === 'people') return `<select ${a}><option value="">Choose…</option>${S.users.map((u) => `<option value="${esc(u.id)}"${u.id === r.value ? ' selected' : ''}>${esc(u.name || u.id)}</option>`).join('')}</select>`;
+      if (g === 'link') return `<select ${a}><option value="">Choose…</option>${S.items.filter((x) => x.sectionId === f.target).map((x) => `<option value="${esc(x.id)}"${x.id === r.value ? ' selected' : ''}>${esc(x.title)}</option>`).join('')}</select>`;
+      return '';
+    };
+    return `<div class="fpanel">
+      ${st.rules.map((r, i) => {
+        const f = colOf(s, r.key) || cols[0];
+        return `<div class="frule"><span class="fw">${i ? 'and' : 'Where'}</span>
+          <select data-fr="${i}" data-p="key" aria-label="Column">${cols.map((c) => `<option value="${esc(c.key)}"${c.key === f.key ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select>
+          <select data-fr="${i}" data-p="op" aria-label="Condition">${OPS[opGroup(f.type)].map(([k, l]) => `<option value="${k}"${k === r.op ? ' selected' : ''}>${l}</option>`).join('')}</select>
+          ${valueInput(r, i, f)}
+          <button type="button" class="ibtn" data-act="fr-del" data-i="${i}" aria-label="Remove filter">×</button></div>`;
+      }).join('')}
+      <div class="frow"><button type="button" class="btn sm" data-act="fr-add">+ Add filter</button>${st.rules.length ? '<button type="button" class="linkbtn" data-act="fr-clear">Clear all filters</button>' : '<span class="muted">Add a filter to narrow the list, for example Stage is Pending.</span>'}</div>
+    </div>`;
+  }
+
+  function sortControls(s) {
+    const st = fstate(s.id).sort;
+    return `<label class="sortbox"><span>Sort</span><select data-sort="${esc(s.id)}" aria-label="Sort by"><option value="">Deadline (default)</option>${colsFor(s).map((c) => `<option value="${esc(c.key)}"${c.key === st.key ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select>
+      <button type="button" class="ibtn" data-act="sort-dir" data-section="${esc(s.id)}" title="${st.dir === 'desc' ? 'Descending' : 'Ascending'}" aria-label="Sort direction: ${st.dir === 'desc' ? 'descending' : 'ascending'}"${st.key ? '' : ' disabled'}>${st.dir === 'desc' ? '↓' : '↑'}</button></label>`;
+  }
+
+  function refreshSection(panelToo) {
+    const body = $('#secBody');
+    if (!body) return;
+    const s = section(body.dataset.section);
+    if (panelToo) { const p = $('#filterPanel'); if (p) p.innerHTML = filterPanel(s); }
+    const n = fstate(s.id).rules.length;
+    const b = $('#frBtn');
+    if (b) { b.textContent = n ? 'Filter · ' + n : 'Filter'; b.classList.toggle('on', n > 0 || fstate(s.id).open); }
+    body.innerHTML = sectionBody(s);
   }
 
   function viewSection(id) {
@@ -471,8 +770,11 @@
       <div class="toolbar">
         <div class="grow"><input type="search" id="secQuery" placeholder="Search ${esc(s.name)}" value="${esc(S.f.q)}" data-filter-input="q" aria-label="Search"></div>
         <select id="secWho" data-filter="who" aria-label="Show"><option value="all">All items</option><option value="mine"${S.f.who === 'mine' ? ' selected' : ''}>Only mine</option></select>
+        <button type="button" class="btn${fstate(s.id).rules.length || fstate(s.id).open ? ' on' : ''}" id="frBtn" data-act="fr-toggle">${fstate(s.id).rules.length ? 'Filter · ' + fstate(s.id).rules.length : 'Filter'}</button>
+        ${sortControls(s)}
         ${stageF(s) ? `<div class="seg" role="group" aria-label="View"><button type="button" class="${view === 'board' ? 'on' : ''}" data-act="view" data-v="board" data-section="${esc(s.id)}">Board</button><button type="button" class="${view === 'table' ? 'on' : ''}" data-act="view" data-v="table" data-section="${esc(s.id)}">Table</button></div>` : ''}
       </div>
+      <div id="filterPanel">${filterPanel(s)}</div>
       <div id="secBody" data-section="${esc(s.id)}">${sectionBody(s)}</div>`;
   }
 
@@ -494,7 +796,7 @@
     const cols = sf.options.map((o) => ({ value: o.value, label: o.label, color: o.color }));
     if (list.some((it) => !optOf(sf, val(it, sf)))) cols.push({ value: '', label: 'No ' + sf.label.toLowerCase(), color: 'gray' });
     return `<div class="board">${cols.map((c) => {
-      const cards = list.filter((it) => (optOf(sf, val(it, sf)) ? val(it, sf) : '') === c.value).sort(byDue);
+      const cards = list.filter((it) => (optOf(sf, val(it, sf)) ? val(it, sf) : '') === c.value).sort(sorter(s));
       return `<section class="col" data-drop-stage="${esc(c.value)}" data-drop-section="${esc(s.id)}">
         <div class="col-h"><i class="dot f-${c.color}"></i><b>${esc(c.label)}</b><span class="n">${cards.length}</span>${total && cards.length ? `<span class="sum">${moneyShortOrNum(total, sum(cards, (it) => val(it, total)))}</span>` : ''}</div>
         <div class="col-b">${cards.map((it) => card(s, it)).join('') || '<div class="none">Drop a card here</div>'}</div>
@@ -532,13 +834,15 @@
   }
 
   function table(s, list) {
-    if (!list.length) return '<div class="empty-state"><b>Nothing matches</b>Clear the search or switch to All items.</div>';
+    if (!list.length) return '<div class="empty-state"><b>Nothing matches</b>Clear the search or the filters, or switch to All items.</div>';
     const cols = s.fields.filter((f) => f.type !== 'longtext');
-    const rows = list.slice().sort(byDue).map((it) => `
+    const st = fstate(s.id).sort;
+    const arrow = (f) => (st.key === f.key ? (st.dir === 'desc' ? ' ↓' : ' ↑') : '');
+    const rows = list.slice().sort(sorter(s)).map((it) => `
       <tr data-act="open" data-id="${esc(it.id)}">${cols.map((f) => `<td class="${f.key === 'title' ? 'title' : ['currency', 'number'].includes(f.type) ? 'r' : 'nw'}">${f.key === 'title' ? esc(it.title) + (ageInfo(s, it) ? ' ' + chip(ageInfo(s, it)) : '') : show(s, it, f, 'table')}</td>`).join('')}
         <td class="nw">${avatars(it.editors || [], 3)}</td></tr>`).join('');
     const totals = cols.some((f) => f.total);
-    return `<div class="tablewrap"><table class="t"><thead><tr>${cols.map((f) => `<th class="${['currency', 'number'].includes(f.type) ? 'r' : ''}">${esc(f.label)}</th>`).join('')}<th>Editors</th></tr></thead>
+    return `<div class="tablewrap"><table class="t"><thead><tr>${cols.map((f) => `<th class="${['currency', 'number'].includes(f.type) ? 'r' : ''}"><button type="button" class="thsort${st.key === f.key ? ' on' : ''}" data-act="sort-col" data-section="${esc(s.id)}" data-key="${esc(f.key)}">${esc(f.label)}${arrow(f)}</button></th>`).join('')}<th>Editors</th></tr></thead>
       <tbody>${rows}</tbody>${totals ? `<tfoot><tr>${cols.map((f, i) => `<td class="${f.total ? 'r' : ''}">${f.total ? moneyShortOrNum(f, sum(list, (it) => val(it, f))) : i === 0 ? 'Total' : ''}</td>`).join('')}<td></td></tr></tfoot>` : ''}</table></div>`;
   }
 
@@ -594,12 +898,12 @@
   function viewTeam() {
     if (!S.me.isSuper) return '<div class="empty-state"><b>Super admin only</b></div>';
     const secs = liveSections();
-    const people = S.users.slice().sort((a, b) => (a.id === Core.SUPER_ADMIN ? -1 : b.id === Core.SUPER_ADMIN ? 1 : (a.name || a.id).localeCompare(b.name || b.id)));
+    const people = S.users.slice().sort((a, b) => (Core.isSuperId(b.id) - Core.isSuperId(a.id)) || (a.name || a.id).localeCompare(b.name || b.id));
     const lvl = (sid, uid) => { const a = S.access.find((x) => x.sectionId === sid && x.userId === uid); return a ? a.level : 'none'; };
     const matrix = people.map((u) => `<tr>
       <td class="nw sticky"><button class="linkrow" data-act="user-edit" data-id="${esc(u.id)}">${avatar(u.id)} <span><b>${esc(u.name || u.id)}</b><small>${esc(u.id)}</small></span></button></td>
-      <td class="nw">${u.id === Core.SUPER_ADMIN ? '<span class="chip info">Super admin</span>' : u.active ? '<span class="chip ok">Active</span>' : '<span class="chip">Switched off</span>'}</td>
-      ${secs.map((s) => u.id === Core.SUPER_ADMIN ? '<td class="nw muted">Full access</td>'
+      <td class="nw">${Core.isSuperId(u.id) ? '<span class="chip info">Super admin</span>' : u.active ? '<span class="chip ok">Active</span>' : '<span class="chip">Switched off</span>'}</td>
+      ${secs.map((s) => Core.isSuperId(u.id) ? '<td class="nw muted">Full access</td>'
         : `<td><select class="lvl lvl-${lvl(s.id, u.id)}" data-access="${esc(s.id)}|${esc(u.id)}" aria-label="${esc((u.name || u.id) + ' — ' + s.name)}">${Core.LEVELS.map((l) => `<option value="${l}"${lvl(s.id, u.id) === l ? ' selected' : ''}>${l === 'none' ? '—' : LEVEL_LABEL[l]}</option>`).join('')}</select></td>`).join('')}
     </tr>`).join('');
     return `
@@ -947,7 +1251,7 @@
 
   function openUser(id, armed) {
     const u = id ? user(id) : { id: '', name: '', active: true };
-    const isSuperRow = u.id === Core.SUPER_ADMIN;
+    const isSuperRow = Core.isSuperId(u.id);
     S.drawer = { kind: 'user', id: id || null, armed: !!armed };
     const secs = liveSections();
     const lvl = (sid) => { const a = S.access.find((x) => x.sectionId === sid && x.userId === u.id); return a ? a.level : 'none'; };
@@ -961,7 +1265,7 @@
             <label class="fld wide"><span>Name</span><input type="text" name="name" value="${esc(u.name)}" placeholder="Filled in from Google at first sign-in if left empty"></label>
             <label class="fld chk wide"><input type="checkbox" name="active"${u.active !== false ? ' checked' : ''}${isSuperRow ? ' disabled' : ''}><span>Can sign in</span></label>
             ${!isSuperRow && secs.length ? `<div class="fld wide"><span>Section access</span><div class="acc-list">${secs.map((s) => `<label class="acc">${secMark(s)}<span>${esc(s.name)}</span><select name="acc_${esc(s.id)}">${Core.LEVELS.map((l) => `<option value="${l}"${lvl(s.id) === l ? ' selected' : ''}>${l === 'none' ? 'No access' : LEVEL_LABEL[l]}</option>`).join('')}</select></label>`).join('')}</div></div>` : ''}
-            ${isSuperRow ? '<div class="banner wide"><span>The super admin always has full access and cannot be switched off.</span></div>' : ''}
+            ${isSuperRow ? '<div class="banner wide"><span>Super admins always have full access and cannot be switched off.</span></div>' : ''}
             <div class="form-actions">
               <button type="submit" class="btn primary" id="saveBtn">${id ? 'Save changes' : 'Add user'}</button><button type="button" class="btn" data-act="close-drawer">Cancel</button>
               <span class="sp"></span>
@@ -983,7 +1287,7 @@
     btn.disabled = true;
     btn.textContent = 'Saving…';
     try {
-      const res = id ? await API.call('user.update', { id, patch: { name, active: email === Core.SUPER_ADMIN ? true : active } })
+      const res = id ? await API.call('user.update', { id, patch: { name, active: Core.isSuperId(email) ? true : active } })
         : await API.call('user.create', { id: email, name, active });
       const i = S.users.findIndex((u) => u.id === res.user.id);
       if (i >= 0) S.users[i] = res.user; else S.users.push(res.user);
@@ -1117,6 +1421,59 @@
       case 'upload': { const fi = $('#fileInput'); if (fi) fi.click(); break; }
       case 'file-open': openFile(d.file); break;
       case 'view': S.f.view[d.section] = d.v; saveViews(); render(); break;
+      // calendar
+      case 'cal-view': S.f.cal.view = d.v; render(); break;
+      case 'cal-day': S.f.cal.anchor = d.day; S.f.cal.view = 'week'; render(); break;
+      case 'cal-nav': {
+        const c = S.f.cal;
+        const a = parseDay(c.anchor) || new Date();
+        if (d.dir === '0') c.anchor = today();
+        else if (c.view === 'month') c.anchor = dayStr(new Date(a.getFullYear(), a.getMonth() + Number(d.dir), 1));
+        else { a.setDate(a.getDate() + Number(d.dir) * (c.view === 'week' ? 7 : 14)); c.anchor = dayStr(a); }
+        render();
+        break;
+      }
+      case 'cal-resync': {
+        el.disabled = true;
+        el.textContent = 'Syncing…';
+        API.call('calendar.resync').then((r) => {
+          toast(r.remaining ? `Synced ${r.synced} items. ${r.remaining} left — press again to continue.` : `Google Calendar is up to date (${r.synced} items).`);
+        }).catch(handleError).finally(() => { el.disabled = false; el.textContent = 'Re-sync Google Calendar'; });
+        break;
+      }
+      // filter & sort
+      case 'fr-toggle': case 'fr-add': case 'fr-del': case 'fr-clear': {
+        const sid = $('#secBody').dataset.section;
+        const st = fstate(sid);
+        if (d.act === 'fr-toggle') {
+          if (!st.rules.length) st.open = !st.open;
+          if (st.open && !st.rules.length) st.rules.push({ key: 'title', op: 'contains', value: '' });
+        }
+        if (d.act === 'fr-add') { st.open = true; st.rules.push({ key: 'title', op: 'contains', value: '' }); }
+        if (d.act === 'fr-del') { st.rules.splice(Number(d.i), 1); if (!st.rules.length) st.open = false; }
+        if (d.act === 'fr-clear') { st.rules = []; st.open = false; }
+        saveF();
+        refreshSection(true);
+        if (d.act !== 'fr-del' && d.act !== 'fr-clear') {
+          const inputs = document.querySelectorAll('#filterPanel [data-p="value"]');
+          if (inputs.length) inputs[inputs.length - 1].focus();
+        }
+        break;
+      }
+      case 'sort-dir': {
+        const st = fstate(d.section).sort;
+        st.dir = st.dir === 'desc' ? 'asc' : 'desc';
+        saveF();
+        render();
+        break;
+      }
+      case 'sort-col': {
+        const st = fstate(d.section).sort;
+        if (st.key === d.key) st.dir = st.dir === 'desc' ? 'asc' : 'desc'; else { st.key = d.key; st.dir = 'asc'; }
+        saveF();
+        render();
+        break;
+      }
       case 'refresh': loadData().then(() => toast('Up to date')); break;
       case 'signout': signOut(); break;
       case 'demo-login':
@@ -1241,6 +1598,35 @@
       setAccess(sid, uid2, t.value).catch((err) => { handleError(err); render(); });
       return;
     }
+    if (t.dataset.cal) {
+      S.f.cal[t.dataset.cal] = t.value;
+      render();
+      return;
+    }
+    if (t.dataset.sort) {
+      fstate(t.dataset.sort).sort.key = t.value;
+      saveF();
+      render();
+      return;
+    }
+    if (t.dataset.fr !== undefined) {
+      const sid = $('#secBody').dataset.section;
+      const s = section(sid);
+      const r = fstate(sid).rules[Number(t.dataset.fr)];
+      if (t.dataset.p === 'key') {
+        r.key = t.value;
+        r.op = OPS[opGroup(colOf(s, r.key).type)][0][0];
+        r.value = '';
+      } else if (t.dataset.p === 'op') {
+        r.op = t.value;
+        if (NO_VALUE.includes(r.op)) r.value = '';
+      } else {
+        r.value = t.value;
+      }
+      saveF();
+      refreshSection(t.dataset.p !== 'value');
+      return;
+    }
     if (t.dataset.filter) {
       S.f[t.dataset.filter] = t.value;
       const body = $('#secBody');
@@ -1256,6 +1642,15 @@
     if (t.matches('[data-pick-filter]')) {
       const q = t.value.toLowerCase();
       t.closest('.pick-b').querySelectorAll('.prow').forEach((r) => { r.hidden = q && !r.textContent.toLowerCase().includes(q); });
+      return;
+    }
+    if (t.dataset.fr !== undefined && t.dataset.p === 'value' && t.tagName === 'INPUT' && t.type !== 'date') {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        fstate($('#secBody').dataset.section).rules[Number(t.dataset.fr)].value = t.value;
+        saveF();
+        refreshSection(false);
+      }, 200);
       return;
     }
     if (t.dataset.filterInput) {

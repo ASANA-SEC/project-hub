@@ -441,3 +441,71 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
   .tf-row .fld select { min-width: 0; }
   .tf-n { display: none; }
 }
+
+/* ---------- filter & sort ---------- */
+.btn.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.sortbox { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-3); }
+.sortbox .ibtn { width: 34px; height: 34px; }
+.fpanel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.frule { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.frule .fw { width: 46px; font-size: 12.5px; color: var(--ink-3); font-weight: 500; }
+.frule select, .frule input { height: 32px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); padding: 0 8px; min-width: 0; }
+.frule input[type=text] { flex: 1 1 180px; max-width: 320px; }
+.frow { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 12.5px; }
+.thsort { background: none; border: 0; padding: 0; font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; white-space: nowrap; }
+.thsort:hover, .thsort.on { color: var(--accent); }
+.banner.info { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+
+/* ---------- calendar ---------- */
+.ctitle { font: 600 16px var(--cond); }
+.clegend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-3); }
+.clegend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; background: hsl(var(--h) 45% 45%); }
+.clegend i.lg-late { background: var(--crit); }
+.clegend i.lg-done { background: var(--line-strong); }
+.cgrid { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.cdow, .cdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.cdow span { padding: 7px 8px; font: 600 11.5px var(--cond); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.cday { min-height: 112px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 4px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cday:nth-child(7n) { border-right: 0; }
+.cday.out { background: var(--surface-2); }
+.cday.out .cnum { color: var(--ink-3); }
+.cnum { align-self: flex-start; background: none; border: 0; padding: 2px 6px; border-radius: 10px; font: 500 12px var(--font); cursor: pointer; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.cnum:hover { background: var(--surface-2); }
+.cday.today .cnum { background: var(--accent); color: var(--accent-ink); }
+.ev {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 5px; width: 100%; text-align: left; cursor: pointer;
+  border: 0; border-left: 3px solid hsl(var(--h) 45% 45%); background: hsl(var(--h) 45% 45% / .12);
+  border-radius: 4px; padding: 2px 6px; font-size: 12px; line-height: 1.35; color: var(--ink); min-width: 0;
+}
+.ev:hover { background: hsl(var(--h) 45% 45% / .22); }
+.ev .evt { font: 500 11px var(--mono); color: var(--ink-2); }
+.ev .evn { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev .evs { flex-basis: 100%; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev.late { border-left-color: var(--crit); background: var(--crit-soft); }
+.ev.done { opacity: .55; }
+.ev.done .evn { text-decoration: line-through; }
+.more { background: none; border: 0; padding: 0 6px; text-align: left; font-size: 11.5px; color: var(--accent); cursor: pointer; }
+.cweek { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+.wday { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 8px; display: flex; flex-direction: column; gap: 5px; min-height: 220px; min-width: 0; }
+.wday.today { border-color: var(--accent); }
+.wday .wh { font-size: 12.5px; color: var(--ink-3); padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.wday .wh b { color: var(--ink); }
+.wday .ev .evn { white-space: normal; }
+.wday .none { color: var(--ink-3); font-size: 12px; }
+.agenda { display: flex; flex-direction: column; gap: 12px; }
+.aday { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; display: flex; flex-direction: column; gap: 5px; }
+.aday .ah { font: 600 13px var(--cond); color: var(--ink-2); }
+.aday .ah.now { color: var(--accent); }
+.aday .ah.crit { color: var(--crit); }
+.aday .ev { padding: 5px 8px; font-size: 13px; }
+.aday .ev .evn { white-space: normal; }
+@media (max-width: 980px) {
+  .cweek { grid-template-columns: 1fr; }
+  .wday { min-height: 0; }
+}
+@media (max-width: 640px) {
+  .cday { min-height: 64px; padding: 2px; }
+  .cday .ev .evt { display: none; }
+  .cday .ev { padding: 1px 3px; font-size: 10.5px; }
+  .cdow span { padding: 6px 2px; text-align: center; letter-spacing: 0; }
+}

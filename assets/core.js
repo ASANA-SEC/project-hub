@@ -12,7 +12,9 @@
 var Core = (function () {
   'use strict';
 
-  var SUPER_ADMIN = 'sam.secov@gmail.com';
+  // Super admins have full access everywhere and cannot be switched off, deleted or given less access.
+  var SUPER_ADMINS = ['sam.secov@gmail.com', 'szesian.mitosc@gmail.com', 'eileen.secov@gmail.com'];
+  function isSuperId(id) { return SUPER_ADMINS.indexOf(String(id || '').toLowerCase()) >= 0; }
   var LEVELS = ['none', 'viewer', 'contributor', 'editor', 'manager'];
   var FIELD_TYPES = ['text', 'longtext', 'number', 'currency', 'percent', 'date', 'datetime', 'select', 'person', 'checkbox', 'link', 'url'];
   var COLORS = ['gray', 'blue', 'teal', 'green', 'amber', 'red', 'purple'];
@@ -39,6 +41,34 @@ var Core = (function () {
     }
     return 'none';
   }
+  /**
+   * Whose calendar this person may look at, as { userId: [sectionIds] | '*' }.
+   * Super admins: everyone, every section. Section managers: the people on the sections they manage
+   * (by access level or by being named on an item there), never a super admin. Everyone: themselves.
+   */
+  function monitorable(ctx, sections, items, users) {
+    var out = {};
+    out[ctx.me.id] = '*';
+    if (ctx.me.isSuper) {
+      users.forEach(function (u) { out[u.id] = '*'; });
+      return out;
+    }
+    sections.forEach(function (s) {
+      if (!live(s) || level(ctx, s.id) !== 'manager') return;
+      var ids = {};
+      ctx.access.forEach(function (a) { if (a.sectionId === s.id && rank(a.level) >= 1) ids[a.userId] = true; });
+      items.forEach(function (it) {
+        if (it.sectionId !== s.id) return;
+        arr(it.editors).concat(arr(it.collaborators)).forEach(function (u) { ids[u] = true; });
+      });
+      Object.keys(ids).forEach(function (u) {
+        if (isSuperId(u) || out[u] === '*') return;
+        (out[u] = out[u] || []).push(s.id);
+      });
+    });
+    return out;
+  }
+
   function onItem(ctx, it) {
     return arr(it.editors).indexOf(ctx.me.id) >= 0 || arr(it.collaborators).indexOf(ctx.me.id) >= 0;
   }
@@ -158,10 +188,10 @@ var Core = (function () {
   /** Turn a verified email into a Project Hub user, or refuse. */
   function identify(store, email, googleName) {
     email = String(email || '').toLowerCase();
-    var isSuper = email === SUPER_ADMIN;
+    var isSuper = isSuperId(email);
     var u = store.all('users').filter(function (x) { return x.id === email; })[0];
     if (!u && isSuper) {
-      u = { id: email, name: googleName || 'Sam', active: true, createdBy: 'system', createdAt: store.now(), updatedAt: store.now() };
+      u = { id: email, name: googleName || '', active: true, createdBy: 'system', createdAt: store.now(), updatedAt: store.now() };
       store.insert('users', u);
     }
     if (!u || (u.active === false && !isSuper)) {
@@ -186,7 +216,7 @@ var Core = (function () {
     var secById = {};
     sections.forEach(function (s) { secById[s.id] = s; });
     var userIds = {};
-    users.forEach(function (u) { if (u.active !== false || u.id === SUPER_ADMIN) userIds[u.id] = true; });
+    users.forEach(function (u) { if (u.active !== false || isSuperId(u.id)) userIds[u.id] = true; });
     var now = store.now();
 
     function needSuper() { if (!me.isSuper) throw fail('FORBIDDEN', 'Only the super admin can do this.'); }
@@ -227,7 +257,10 @@ var Core = (function () {
             .map(function (s) { var c = clone(s); c.myLevel = level(ctx, s.id); return c; }),
           items: items,
           comments: store.all('comments').filter(function (c) { return vis[c.itemId]; }),
-          access: me.isSuper ? access : access.filter(function (a) { return a.userId === me.id; }),
+          // Own rows, plus everyone's rows on sections this person manages (managers see who is on their team).
+          access: me.isSuper ? access : access.filter(function (a) {
+            return a.userId === me.id || (live(secById[a.sectionId]) && level(ctx, a.sectionId) === 'manager');
+          }),
         };
       }
 
@@ -352,7 +385,7 @@ var Core = (function () {
         var up = p.patch || {};
         if ('name' in up) u2.name = String(up.name || '').trim().slice(0, 80);
         if ('active' in up) {
-          if (u2.id === SUPER_ADMIN && !up.active) throw fail('BAD_REQUEST', 'The super admin account cannot be switched off.');
+          if (isSuperId(u2.id) && !up.active) throw fail('BAD_REQUEST', 'A super admin account cannot be switched off.');
           u2.active = !!up.active;
         }
         u2.updatedAt = now;
@@ -362,7 +395,7 @@ var Core = (function () {
 
       case 'user.remove': {
         needSuper();
-        if (p.id === SUPER_ADMIN) throw fail('BAD_REQUEST', 'The super admin account cannot be deleted.');
+        if (isSuperId(p.id)) throw fail('BAD_REQUEST', 'A super admin account cannot be deleted.');
         store.del('users', p.id);
         store.delWhere('access', function (a) { return a.userId === p.id; });
         return { id: p.id };
@@ -372,7 +405,7 @@ var Core = (function () {
         needSuper();
         getSection(p.sectionId);
         if (!users.some(function (x) { return x.id === p.userId; })) throw fail('NOT_FOUND', 'This account no longer exists.');
-        if (p.userId === SUPER_ADMIN) throw fail('BAD_REQUEST', 'The super admin already has full access everywhere.');
+        if (isSuperId(p.userId)) throw fail('BAD_REQUEST', 'Super admins already have full access everywhere.');
         var lv = LEVELS.indexOf(p.level) >= 0 ? p.level : 'none';
         var row = access.filter(function (a) { return a.sectionId === p.sectionId && a.userId === p.userId; })[0];
         if (lv === 'none') {
@@ -396,7 +429,7 @@ var Core = (function () {
   }
 
   return {
-    SUPER_ADMIN: SUPER_ADMIN, LEVELS: LEVELS, FIELD_TYPES: FIELD_TYPES, COLORS: COLORS,
-    rank: rank, level: level, can: can, fail: fail, identify: identify, handle: handle, cleanFields: cleanFields,
+    SUPER_ADMINS: SUPER_ADMINS, isSuperId: isSuperId, LEVELS: LEVELS, FIELD_TYPES: FIELD_TYPES, COLORS: COLORS,
+    rank: rank, level: level, can: can, monitorable: monitorable, fail: fail, identify: identify, handle: handle, cleanFields: cleanFields,
   };
 })();
