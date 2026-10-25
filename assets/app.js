@@ -1,111 +1,35 @@
-// Project Hub — single-page app. Views render from state S into #main;
-// every click goes through one delegated handler keyed on data-act.
+// Project Hub — single-page app. Sections, their columns and who may do what all come
+// from the data; every permission check here mirrors core.js, which the server enforces.
 (function () {
   'use strict';
 
   const CFG = window.APP_CONFIG || {};
   const API = window.API;
   const CUR = CFG.CURRENCY || 'RM';
+  const can = Core.can;
 
-  // ------------------------------------------------------------ reference lists
-
-  const RFQ_STAGES = [
-    { key: 'todo', label: 'To Do' },
-    { key: 'pending', label: 'Pending' },
-    { key: 'complete', label: 'Complete' },
-    { key: 'draft_cptp', label: 'Draft CP & TP' },
-    { key: 'cptp_rejected', label: 'CP & TP Rejected' },
-    { key: 'cptp_approved', label: 'Approved CP & TP' },
-    { key: 'early_sub', label: 'Early Submission' },
-    { key: 'submitted', label: 'Tender Submitted' },
-    { key: 'tc', label: 'Technical Clarification' },
-    { key: 'tc_submitted', label: 'TC Submitted' },
-    { key: 'closed', label: 'Closed by Management' },
-  ];
-  const PRE = ['todo', 'pending', 'complete', 'draft_cptp', 'cptp_rejected', 'cptp_approved'];
-  const SUB = ['early_sub', 'submitted', 'tc', 'tc_submitted'];
-  const RFQ_CATEGORIES = ['Supply', 'Project/Service'];
-  const RFQ_OUTCOMES = ['Pending', 'Awarded', 'Lost', 'Cancelled'];
-  const PROJECT_STATUS = ['Planning', 'Active', 'On Hold', 'Completed'];
-  const HEALTH = ['On track', 'At risk', 'Off track'];
-  const TASK_STATUS = ['To Do', 'In Progress', 'Review', 'Done'];
-  const PRIORITY = ['Low', 'Medium', 'High', 'Urgent'];
-  const CLAIM_STATUS = ['Draft', 'Submitted', 'Certified', 'Invoiced', 'Paid'];
-  const OPEN_CLAIM = ['Submitted', 'Certified', 'Invoiced'];
-  const ROLES = [['admin', 'Admin — sees and changes everything'], ['editor', 'Editor — PM / staff'], ['viewer', 'Viewer — read only']];
-  const FILE_ENTITIES = ['rfqs', 'projects', 'tasks', 'claims'];
-
-  const LABEL = { rfqs: 'RFQ / Tender', projects: 'Project', tasks: 'Task', claims: 'Claim', users: 'Team member' };
-
-  const FIELDS = {
-    rfqs: [
-      { k: 'rfqNo', l: 'RFQ / tender no.', t: 'text', req: true },
-      { k: 'client', l: 'Client', t: 'text', list: 'clients' },
-      { k: 'title', l: 'Title / scope', t: 'text', req: true, wide: true },
-      { k: 'category', l: 'Category', t: 'select', opts: RFQ_CATEGORIES },
-      { k: 'stage', l: 'Stage', t: 'select', opts: RFQ_STAGES.map((s) => [s.key, s.label]) },
-      { k: 'assignee', l: 'Assigned to', t: 'user' },
-      { k: 'closingDate', l: 'Closing date & time', t: 'datetime' },
-      { k: 'estValue', l: 'Estimated value (' + CUR + ')', t: 'money' },
-      { k: 'outcome', l: 'Outcome', t: 'select', opts: RFQ_OUTCOMES },
-      { k: 'notes', l: 'Notes', t: 'textarea', wide: true },
-    ],
-    projects: [
-      { k: 'code', l: 'Project code', t: 'text', req: true },
-      { k: 'client', l: 'Client', t: 'text', list: 'clients' },
-      { k: 'name', l: 'Project name', t: 'text', req: true, wide: true },
-      { k: 'pm', l: 'Project manager', t: 'user' },
-      { k: 'status', l: 'Status', t: 'select', opts: PROJECT_STATUS },
-      { k: 'contractValue', l: 'Contract value (' + CUR + ')', t: 'money' },
-      { k: 'voValue', l: 'Approved VO (' + CUR + ')', t: 'money' },
-      { k: 'retentionPct', l: 'Retention %', t: 'number', min: 0, max: 100 },
-      { k: 'progressPct', l: 'Physical progress %', t: 'number', min: 0, max: 100 },
-      { k: 'startDate', l: 'Start date', t: 'date' },
-      { k: 'endDate', l: 'Completion date', t: 'date' },
-      { k: 'health', l: 'Health', t: 'select', opts: HEALTH },
-      { k: 'notes', l: 'Notes', t: 'textarea', wide: true },
-    ],
-    tasks: [
-      { k: 'title', l: 'Task', t: 'text', req: true, wide: true },
-      { k: 'projectId', l: 'Project', t: 'project', req: true },
-      { k: 'assignee', l: 'Assigned to', t: 'user' },
-      { k: 'status', l: 'Status', t: 'select', opts: TASK_STATUS },
-      { k: 'priority', l: 'Priority', t: 'select', opts: PRIORITY },
-      { k: 'dueDate', l: 'Due date', t: 'date' },
-      { k: 'isMilestone', l: 'This is a milestone', t: 'checkbox' },
-      { k: 'notes', l: 'Notes', t: 'textarea', wide: true },
-    ],
-    claims: [
-      { k: 'projectId', l: 'Project', t: 'project', req: true },
-      { k: 'claimNo', l: 'Claim no.', t: 'text', req: true },
-      { k: 'title', l: 'Description', t: 'text', wide: true },
-      { k: 'status', l: 'Status', t: 'select', opts: CLAIM_STATUS },
-      { k: 'submittedDate', l: 'Submitted on', t: 'date' },
-      { k: 'claimedAmount', l: 'Claimed (' + CUR + ')', t: 'money' },
-      { k: 'certifiedAmount', l: 'Certified (' + CUR + ')', t: 'money' },
-      { k: 'paidAmount', l: 'Received (' + CUR + ')', t: 'money' },
-      { k: 'paidDate', l: 'Received on', t: 'date' },
-      { k: 'paymentTermDays', l: 'Payment term (days)', t: 'number', min: 0, max: 365 },
-      { k: 'notes', l: 'Notes', t: 'textarea', wide: true },
-    ],
-    users: [
-      { k: 'id', l: 'Google email', t: 'email', req: true, lockOnEdit: true },
-      { k: 'name', l: 'Name', t: 'text', req: true },
-      { k: 'role', l: 'Access', t: 'select', opts: ROLES },
-      { k: 'active', l: 'Can sign in', t: 'checkbox' },
-    ],
+  const LEVEL_LABEL = { none: 'No access', viewer: 'Viewer', contributor: 'Contributor', editor: 'Editor', manager: 'Manager' };
+  const LEVEL_HELP = {
+    viewer: 'sees every item in the section',
+    contributor: 'adds items and edits the ones they are an editor on',
+    editor: 'edits and deletes any item',
+    manager: 'everything an editor can do, plus changes the section’s columns',
   };
+  const TYPE_LABEL = {
+    text: 'Text', longtext: 'Long text', number: 'Number', currency: 'Amount (' + CUR + ')', percent: 'Percent',
+    date: 'Date', datetime: 'Date & time', select: 'Dropdown', person: 'Person', checkbox: 'Tick box',
+    link: 'Link to another section', url: 'Web link',
+  };
+  const COLOR_LABEL = { gray: 'Grey', blue: 'Blue', teal: 'Teal', green: 'Green', amber: 'Amber', red: 'Red', purple: 'Purple' };
 
   // ------------------------------------------------------------ state
 
   const S = {
-    me: null,
-    data: { users: [], rfqs: [], projects: [], tasks: [], claims: [], comments: [] },
-    loaded: false,
-    drawer: null,
-    f: { rfqQuery: '', rfqMonth: 'all', rfqCat: 'all', rfqWho: 'all', rfqView: 'board', projTab: 'tasks', claimProject: 'all', claimStatus: 'open', projStatus: 'live' },
+    me: null, users: [], sections: [], items: [], comments: [], access: [],
+    loaded: false, drawer: null, tpl: null,
+    f: { q: '', who: 'all', view: {} },
   };
-  try { const v = localStorage.getItem('projecthub_rfqView'); if (v) S.f.rfqView = v; } catch (e) { /* storage blocked */ }
+  try { S.f.view = JSON.parse(localStorage.getItem('projecthub_views') || '{}') || {}; } catch (e) { /* storage blocked */ }
 
   const $ = (sel, root) => (root || document).querySelector(sel);
   const app = $('#app');
@@ -119,46 +43,31 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
   const nf2 = new Intl.NumberFormat('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const nf0 = new Intl.NumberFormat('en-MY', { maximumFractionDigits: 0 });
+  const nf = new Intl.NumberFormat('en-MY', { maximumFractionDigits: 2 });
+  const blank = (v) => v === '' || v === null || v === undefined;
   function money(n) { return CUR + ' ' + nf2.format(Number(n) || 0); }
-  function money0(n) { return CUR + ' ' + nf0.format(Number(n) || 0); }
   function moneyShort(n) {
     n = Number(n) || 0;
     const a = Math.abs(n);
     if (a >= 1e6) return CUR + ' ' + (n / 1e6).toFixed(2) + 'M';
     if (a >= 1e4) return CUR + ' ' + (n / 1e3).toFixed(0) + 'K';
-    return CUR + ' ' + nf0.format(n);
+    return CUR + ' ' + nf.format(Math.round(n));
   }
-  function pct(a, b) { return b ? Math.round((a / b) * 100) : 0; }
   function sum(arr, f) { return arr.reduce((t, x) => t + (Number(f(x)) || 0), 0); }
+  const uid = () => Math.random().toString(36).slice(2, 8);
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function dayStr(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
   function today() { return dayStr(new Date()); }
-  function parseDay(s) {
-    if (!s) return null;
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-    return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
-  }
-  function parseDT(s) {
-    if (!s) return null;
-    const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? parseDay(s) : new Date(s);
-    return isNaN(d) ? null : d;
-  }
-  function addDays(s, n) { const d = parseDay(s); if (!d) return ''; d.setDate(d.getDate() + n); return dayStr(d); }
-  function daysFromToday(s) { const d = parseDay(s); if (!d) return null; return Math.round((d - parseDay(today())) / 864e5); }
+  function parseDay(s) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || ''); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; }
+  function parseDT(s) { if (!s) return null; const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? parseDay(s) : new Date(s); return isNaN(d) ? null : d; }
+  function daysFromToday(s) { const d = parseDay(s); return d ? Math.round((d - parseDay(today())) / 864e5) : null; }
   function hoursUntil(s) { const d = parseDT(s); return d ? (d - Date.now()) / 36e5 : null; }
   function daysSince(iso) { const d = parseDT(iso); return d ? (Date.now() - d) / 864e5 : 0; }
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   function fmtDate(s) { const d = parseDT(s); return d ? d.getDate() + ' ' + MON[d.getMonth()] + ' ' + d.getFullYear() : '—'; }
   function fmtShort(s) { const d = parseDT(s); return d ? d.getDate() + ' ' + MON[d.getMonth()] : '—'; }
-  function fmtDT(s) {
-    const d = parseDT(s);
-    if (!d) return '—';
-    return fmtShort(s) + (/T\d/.test(s) ? ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) : '');
-  }
-  function monthKey(s) { const d = parseDT(s); return d ? d.getFullYear() + '-' + pad(d.getMonth() + 1) : ''; }
-  function monthLabel(k) { const [y, m] = k.split('-'); return MON[+m - 1] + ' ' + y; }
+  function fmtDT(s) { const d = parseDT(s); if (!d) return '—'; return fmtShort(s) + (/T\d/.test(s) ? ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) : ''); }
   function ago(iso) {
     const s = (Date.now() - (parseDT(iso) || Date.now())) / 1000;
     if (s < 60) return 'just now';
@@ -167,14 +76,14 @@
     if (s < 86400 * 7) return Math.floor(s / 86400) + ' d ago';
     return fmtDate(iso);
   }
-  function nowIso() { return new Date().toISOString(); }
 
-  function find(entity, id) { return S.data[entity].find((r) => r.id === id); }
-  function replace(entity, rec) {
-    const i = S.data[entity].findIndex((r) => r.id === rec.id);
-    if (i >= 0) S.data[entity][i] = rec; else S.data[entity].push(rec);
-  }
-  function user(id) { return S.data.users.find((u) => u.id === id); }
+  const ctx = () => ({ me: S.me, access: S.access });
+  const section = (id) => S.sections.find((s) => s.id === id);
+  const item = (id) => S.items.find((i) => i.id === id);
+  const liveSections = () => S.sections.filter((s) => !s.archived);
+  const myLevel = (s) => Core.level(ctx(), s.id);
+  const hasSectionAccess = (s) => s && !s.archived && Core.rank(myLevel(s)) >= 1;
+  function user(id) { return S.users.find((u) => u.id === id); }
   function userName(id) { if (!id) return 'Unassigned'; const u = user(id); return (u && u.name) || id; }
   function initials(id) {
     const n = userName(id).replace(/\(.*?\)/g, '').trim();
@@ -183,26 +92,86 @@
   }
   function hue(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
   function avatar(id, lg) {
-    if (!id) return `<span class="av${lg ? ' lg' : ''}" style="background:var(--line-strong)" title="Unassigned">–</span>`;
+    if (!id) return '';
     return `<span class="av${lg ? ' lg' : ''}" style="background:hsl(${hue(id)} 42% 40%)" title="${esc(userName(id))}">${esc(initials(id))}</span>`;
   }
-  function stageLabel(k) { const s = RFQ_STAGES.find((x) => x.key === k); return s ? s.label : k || '—'; }
-  function projectName(id) { const p = find('projects', id); return p ? p.name : '—'; }
-
-  const isAdmin = () => S.me && S.me.role === 'admin';
-  const canWrite = () => S.me && (S.me.role === 'admin' || S.me.role === 'editor');
-  function canEditRec(entity, rec) {
-    if (isAdmin()) return true;
-    if (!canWrite() || entity === 'users') return false;
-    return true;
+  function avatars(ids, max) {
+    const list = [...new Set(ids.filter(Boolean))];
+    const shown = list.slice(0, max || 3).map((id) => avatar(id)).join('');
+    return `<span class="avs">${shown}${list.length > (max || 3) ? `<span class="av more">+${list.length - (max || 3)}</span>` : ''}</span>`;
   }
-  function canDelete(entity, rec) {
-    if (isAdmin()) return true;
-    return canWrite() && entity === 'tasks';
+
+  // Columns and values
+  const fieldOf = (s, key) => s.fields.find((f) => f.key === key);
+  const stageF = (s) => (s.stageField ? fieldOf(s, s.stageField) : null);
+  const dueF = (s) => s.fields.find((f) => f.due);
+  const val = (it, f) => (f.key === 'title' ? it.title : (it.data || {})[f.key]);
+  const optOf = (f, v) => (f && f.options || []).find((o) => o.value === v);
+  const stageOpt = (s, it) => { const f = stageF(s); return f ? optOf(f, val(it, f)) : null; };
+  const isDone = (s, it) => { const o = stageOpt(s, it); return !!(o && o.done); };
+  const sectionOf = (it) => section(it.sectionId);
+  const involved = (it) => (it.editors || []).includes(S.me.id) || (it.collaborators || []).includes(S.me.id) ||
+    (sectionOf(it) ? sectionOf(it).fields.some((f) => f.type === 'person' && val(it, f) === S.me.id) : false);
+  function roleOn(it) {
+    if ((it.editors || []).includes(S.me.id)) return 'Editor';
+    if ((it.collaborators || []).includes(S.me.id)) return 'Collaborator';
+    const s = sectionOf(it);
+    const f = s && s.fields.find((x) => x.type === 'person' && val(it, x) === S.me.id);
+    return f ? f.label : '';
+  }
+
+  function chip(c) { return c ? `<span class="chip ${c.cls}">${esc(c.text)}</span>` : ''; }
+  function dueInfo(s, it) {
+    const f = dueF(s);
+    if (!f || isDone(s, it)) return null;
+    const v = val(it, f);
+    if (!v) return null;
+    if (f.type === 'datetime') {
+      const h = hoursUntil(v);
+      if (h < 0) return { cls: 'crit', sev: 2, text: f.label + ' passed ' + fmtShort(v) };
+      if (h <= 24) return { cls: 'crit', sev: 2, text: 'Due in ' + Math.max(1, Math.round(h)) + 'h' };
+      if (h <= 72) return { cls: 'warn', sev: 1, text: 'Due in ' + Math.ceil(h / 24) + 'd' };
+      return { cls: '', sev: 0, text: 'Due ' + fmtDT(v) };
+    }
+    const n = daysFromToday(v);
+    if (n < 0) return { cls: 'crit', sev: 2, text: 'Late ' + -n + 'd' };
+    if (n === 0) return { cls: 'warn', sev: 1, text: 'Due today' };
+    if (n <= 3) return { cls: 'warn', sev: 1, text: 'Due in ' + n + 'd' };
+    return { cls: '', sev: 0, text: 'Due ' + fmtShort(v) };
+  }
+  function ageInfo(s, it) {
+    const o = stageOpt(s, it);
+    if (!o || !o.alertDays || o.done) return null;
+    const d = Math.floor(daysSince(it.stageChangedAt || it.createdAt));
+    if (d < o.alertDays) return null;
+    return { cls: d >= o.alertDays * 2 ? 'crit' : 'warn', sev: d >= o.alertDays * 2 ? 2 : 1, text: d + 'd in ' + o.label };
+  }
+
+  function show(s, it, f, mode) {
+    const v = val(it, f);
+    switch (f.type) {
+      case 'currency': return blank(v) ? '' : mode === 'card' ? moneyShort(v) : money(v);
+      case 'number': return blank(v) ? '' : nf.format(v);
+      case 'percent':
+        if (blank(v)) return '';
+        return mode === 'table' ? `<span class="pbar"><i style="width:${Math.max(0, Math.min(100, v))}%"></i></span> ${nf.format(v)}%` : nf.format(v) + '%';
+      case 'date': case 'datetime':
+        if (!v) return '';
+        if (f.due) { const d = dueInfo(s, it); if (d) return chip(d); }
+        return f.type === 'date' ? fmtDate(v) : fmtDT(v);
+      case 'select': { const o = optOf(f, v); return o ? `<span class="chip c-${o.color}">${esc(o.label)}</span>` : ''; }
+      case 'person': return v ? `<span class="who">${avatar(v)}<span>${esc(userName(v))}</span></span>` : '';
+      case 'checkbox': return v ? (mode === 'card' ? `<span class="chip c-blue">✓ ${esc(f.label)}</span>` : '✓') : '';
+      case 'link': { if (!v) return ''; const t = item(v); return t ? esc(t.title) : '<span class="muted">(no access)</span>'; }
+      case 'url': return v && /^https?:\/\//i.test(v) ? `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v.replace(/^https?:\/\//, '').slice(0, 40))}</a>` : '';
+      case 'longtext': return esc(String(v || '').slice(0, 90)) + (String(v || '').length > 90 ? '…' : '');
+      default: return esc(v);
+    }
   }
 
   function ssGet(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
   function ssSet(k, v) { try { if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch (e) { /* blocked */ } }
+  function saveViews() { try { localStorage.setItem('projecthub_views', JSON.stringify(S.f.view)); } catch (e) { /* blocked */ } }
 
   let toastTimer;
   function toast(msg, isErr) {
@@ -216,62 +185,14 @@
   const AUTH_CODES = ['AUTH_REQUIRED', 'AUTH_INVALID', 'AUTH_EXPIRED', 'NOT_INVITED'];
   function handleError(e) {
     if (e && AUTH_CODES.includes(e.code)) {
-      ssSet('projecthub_token', null);
-      API.token = null;
       closeDrawer();
-      showSignIn(e.message);
+      signOut(e.message);
       return;
     }
     toast((e && e.message) || 'Something went wrong. Try again.', true);
   }
 
-  // ------------------------------------------------------------ derived figures
-
-  function rfqAging(r) {
-    const d = daysSince(r.stageChangedAt || r.createdAt);
-    if (r.stage === 'todo' && d >= 1) return { cls: 'warn', text: 'Over 1 day' };
-    if (r.stage === 'pending' && d > 2) return { cls: 'crit', text: 'Pending ' + Math.floor(d) + 'd' };
-    if (r.stage === 'pending' && d >= 1) return { cls: 'warn', text: 'Pending ' + Math.floor(d) + 'd' };
-    return null;
-  }
-  function rfqClosing(r) {
-    if (!r.closingDate) return null;
-    if (!PRE.includes(r.stage)) return { cls: '', text: 'Closed ' + fmtShort(r.closingDate) };
-    const h = hoursUntil(r.closingDate);
-    if (h < 0) return { cls: 'crit', text: 'Closing passed ' + fmtShort(r.closingDate) };
-    if (h <= 24) return { cls: 'crit', text: 'Closes in ' + Math.max(1, Math.round(h)) + 'h' };
-    if (h <= 72) return { cls: 'warn', text: 'Closes in ' + Math.ceil(h / 24) + 'd' };
-    return { cls: '', text: 'Closes ' + fmtDT(r.closingDate) };
-  }
-  function taskDue(t) {
-    if (!t.dueDate) return null;
-    if (t.status === 'Done') return { cls: 'ok', text: 'Done' };
-    const n = daysFromToday(t.dueDate);
-    if (n < 0) return { cls: 'crit', text: 'Late ' + -n + 'd' };
-    if (n === 0) return { cls: 'warn', text: 'Due today' };
-    if (n <= 3) return { cls: 'warn', text: 'Due in ' + n + 'd' };
-    return { cls: '', text: 'Due ' + fmtShort(t.dueDate) };
-  }
-  function claimDue(c) { return c.submittedDate ? addDays(c.submittedDate, Number(c.paymentTermDays) || 0) : ''; }
-  function claimOutstanding(c) {
-    if (!OPEN_CLAIM.includes(c.status)) return 0;
-    return Math.max(0, (Number(c.certifiedAmount) || Number(c.claimedAmount) || 0) - (Number(c.paidAmount) || 0));
-  }
-  function claimOverdue(c) { const due = claimDue(c); return OPEN_CLAIM.includes(c.status) && due && daysFromToday(due) < 0; }
-  function projectFinance(p) {
-    const cl = S.data.claims.filter((c) => c.projectId === p.id && c.status !== 'Draft');
-    const revised = (Number(p.contractValue) || 0) + (Number(p.voValue) || 0);
-    const claimed = sum(cl, (c) => c.claimedAmount);
-    const certified = sum(cl, (c) => c.certifiedAmount);
-    const received = sum(cl, (c) => c.paidAmount);
-    const outstanding = sum(cl, claimOutstanding);
-    const retention = certified * (Number(p.retentionPct) || 0) / 100;
-    return { revised, claimed, certified, received, outstanding, retention, overdue: cl.filter(claimOverdue) };
-  }
-  const healthCls = (h) => (h === 'Off track' ? 'crit' : h === 'At risk' ? 'warn' : 'ok');
-  function chip(c) { return c ? `<span class="chip ${c.cls}">${esc(c.text)}</span>` : ''; }
-
-  // ------------------------------------------------------------ boot & auth
+  // ------------------------------------------------------------ sign-in
 
   function jwtExpired(t) {
     try {
@@ -287,9 +208,11 @@
         return;
       }
       const t = ssGet('projecthub_token');
-      if (t && !jwtExpired(t)) { API.token = t; await loadData(); } else showSignIn();
-    } else {
+      if (t && !jwtExpired(t)) { API.token = t; await loadData(); } else showLogin();
+    } else if (API.restore()) {
       await loadData();
+    } else {
+      showLogin();
     }
   }
 
@@ -302,23 +225,32 @@
         s.src = 'https://accounts.google.com/gsi/client';
         s.async = true;
         s.onload = resolve;
-        s.onerror = () => reject(new Error('Could not load Google Sign-In.'));
+        s.onerror = () => { gisLoading = null; reject(new Error('Could not load Google Sign-In. Check your connection.')); };
         document.head.appendChild(s);
       });
     }
     return gisLoading;
   }
 
-  function showSignIn(message) {
+  function showLogin(message) {
     S.loaded = false;
+    document.title = 'Sign in · Project Hub';
+    const demo = API.mode === 'demo';
+    if (demo) S.users = API.accounts();
     app.innerHTML = `
       <div class="signin"><div class="box">
         <div class="brand"><span class="mark">PH</span><div><b style="color:var(--ink)">${esc(CFG.COMPANY_NAME || 'Project Hub')}</b></div></div>
-        <h1>Sign in</h1>
-        <p>Use the Google account your admin added to Project Hub.</p>
+        <div><h1>Sign in</h1><p>For authorised users only. Accounts are created by the super admin.</p></div>
         ${message ? `<div class="err">${esc(message)}</div>` : ''}
-        <div id="gbtn"></div>
+        ${demo ? `
+          <div class="demo-note"><b>Demo mode.</b> Google sign-in starts working once the Google setup in README.md is done. Until then, pick an example account to see what each access level can do.</div>
+          <div class="acct-list">${API.accounts().map((a) => `
+            <button type="button" class="acct" data-act="demo-login" data-id="${esc(a.id)}">${avatar(a.id, true)}
+              <span><b>${esc(a.name || a.id)}</b><small>${esc(a.note)}</small></span></button>`).join('')}</div>
+          <button type="button" class="linkbtn" data-act="reset-demo">Reset example data</button>`
+        : '<div id="gbtn"></div><p class="muted" style="font-size:12.5px">Use the Google account your super admin added.</p>'}
       </div></div>`;
+    if (demo) return;
     loadGis().then(() => {
       google.accounts.id.initialize({
         client_id: CFG.GOOGLE_CLIENT_ID,
@@ -335,23 +267,27 @@
     }).catch((e) => toast(e.message, true));
   }
 
-  function signOut() {
-    ssSet('projecthub_token', null);
-    API.token = null;
-    if (window.google && google.accounts) google.accounts.id.disableAutoSelect();
-    showSignIn();
+  function signOut(message) {
+    if (API.mode === 'remote') {
+      ssSet('projecthub_token', null);
+      API.token = null;
+      if (window.google && google.accounts) google.accounts.id.disableAutoSelect();
+    } else {
+      API.logout();
+    }
+    S.tpl = null;
+    showLogin(message);
   }
 
   async function loadData(silent) {
     try {
-      const res = await API.bootstrap();
+      const res = await API.call('bootstrap');
       S.me = res.me;
-      const data = res.data || {};
-      Object.keys(S.data).forEach((k) => { S.data[k] = Array.isArray(data[k]) ? data[k] : []; });
-      FILE_ENTITIES.forEach((k) => S.data[k].forEach((r) => {
-        if (typeof r.files === 'string') { try { r.files = JSON.parse(r.files); } catch (e) { r.files = []; } }
-        if (!Array.isArray(r.files)) r.files = [];
-      }));
+      S.users = res.users || [];
+      S.sections = res.sections || [];
+      S.items = res.items || [];
+      S.comments = res.comments || [];
+      S.access = res.access || [];
       if (!S.loaded) { S.loaded = true; renderShell(); }
       render();
     } catch (e) {
@@ -361,17 +297,14 @@
 
   // ------------------------------------------------------------ shell
 
-  const ICONS = {
+  const ICON = {
     dashboard: '<path d="M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 3v6h8V3z"/>',
-    rfq: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
-    projects: '<path d="M3 7h18v13H3zM8 7V4h8v3"/><path d="M3 12h18"/>',
-    tasks: '<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/>',
-    claims: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>',
-    users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6"/>',
+    mywork: '<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/>',
+    sections: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M17.5 14v7M14 17.5h7"/>',
+    team: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6"/>',
   };
-  function navItem(key, label, count) {
-    return `<a href="#${key}" data-nav="${key}"><svg viewBox="0 0 24 24">${ICONS[key]}</svg><span class="lbl">${label}</span>${count ? `<span class="count">${count}</span>` : ''}</a>`;
-  }
+  const svg = (k) => `<svg viewBox="0 0 24 24">${ICON[k]}</svg>`;
+  function secMark(s) { return `<span class="smark" style="background:hsl(${hue(s.id)} 38% 42%)">${esc((s.name || '?').trim()[0].toUpperCase())}</span>`; }
 
   function renderShell() {
     app.innerHTML = `
@@ -380,539 +313,511 @@
           <div class="brand"><span class="mark">PH</span><div><b>${esc(CFG.COMPANY_NAME || 'Project Hub')}</b><small>Project Hub</small></div></div>
           <nav class="nav" id="nav"></nav>
           <div class="side-foot">
-            <div class="me">${avatar(S.me.id, true)}<div class="who"><b>${esc(S.me.name || S.me.id)}</b><small>${esc(S.me.role)}</small></div></div>
-            <div class="links">
-              <button type="button" data-act="refresh">Refresh</button>
-              ${API.mode === 'remote' ? '<button type="button" data-act="signout">Sign out</button>' : ''}
-            </div>
+            <div class="me">${avatar(S.me.id, true)}<div class="who"><b>${esc(S.me.name || S.me.id)}</b><small>${S.me.isSuper ? 'Super admin' : esc(S.me.id)}</small></div></div>
+            <div class="links"><button type="button" data-act="refresh">Refresh</button><button type="button" data-act="signout">Sign out</button></div>
           </div>
         </aside>
         <main class="main" id="main"></main>
       </div>`;
   }
 
-  function renderNav(view) {
-    const myOverdue = S.data.tasks.filter((t) => t.assignee === S.me.id && t.status !== 'Done' && t.dueDate && daysFromToday(t.dueDate) < 0).length;
+  function renderNav(active) {
+    const late = S.items.filter((it) => { const s = sectionOf(it); if (!s || !involved(it)) return false; const d = dueInfo(s, it); return d && d.sev === 2; }).length;
+    const link = (href, key, label, icon, count) => `<a href="${href}" data-nav="${key}">${icon}<span class="lbl">${label}</span>${count ? `<span class="count">${count}</span>` : ''}</a>`;
+    let html = link('#dashboard', 'dashboard', 'Dashboard', svg('dashboard')) + link('#mywork', 'mywork', 'My Work', svg('mywork'), late);
+    const secs = liveSections();
+    if (secs.length) html += '<div class="nav-h">Sections</div>' + secs.map((s) => link('#s/' + s.id, 's/' + s.id, esc(s.name), secMark(s))).join('');
+    if (S.me.isSuper) html += '<div class="nav-h">Super admin</div>' + link('#sections', 'sections', 'Manage sections', svg('sections')) + link('#team', 'team', 'Users &amp; access', svg('team'));
     const nav = $('#nav');
-    nav.innerHTML = navItem('dashboard', 'Dashboard') + navItem('rfq', 'RFQ &amp; Tender') + navItem('projects', 'Projects') +
-      navItem('tasks', 'My Tasks', myOverdue) + navItem('claims', 'Payments &amp; Claims') + (isAdmin() ? navItem('users', 'Team &amp; Access') : '');
-    const active = view === 'project' ? 'projects' : view;
+    nav.innerHTML = html;
     nav.querySelectorAll('a').forEach((a) => a.classList.toggle('on', a.dataset.nav === active));
   }
 
   function demoBanner() {
     if (API.mode !== 'demo') return '';
-    return `<div class="banner"><b>Demo mode</b><span>Example data, saved in this browser only. Connect Google Sheets to share it with the team (README.md).</span><button type="button" data-act="reset-demo">Reset example data</button></div>`;
+    return `<div class="banner"><b>Demo mode</b><span>Signed in as ${esc(S.me.name)} with example data saved in this browser only.</span><button type="button" data-act="signout">Switch account</button></div>`;
   }
 
   function route() {
-    const h = decodeURIComponent((location.hash || '#dashboard').slice(1));
-    const [view, id] = h.split('/');
-    return { view: view || 'dashboard', id };
+    const parts = decodeURIComponent((location.hash || '#dashboard').slice(1)).split('/');
+    return { view: parts[0] || 'dashboard', id: parts[1], sub: parts[2] };
   }
 
   function render() {
     if (!S.loaded) return;
     const main = $('#main');
     if (!main) return;
-    const { view, id } = route();
-    renderNav(view);
+    const r = route();
+    let html = '';
+    let nav = r.view;
+    let title = 'Dashboard';
+    if (r.view === 's' && r.sub === 'customize') { html = viewCustomize(r.id); nav = 's/' + r.id; title = 'Customize'; }
+    else if (r.view === 's') { html = viewSection(r.id); nav = 's/' + r.id; title = (section(r.id) || {}).name || 'Section'; }
+    else if (r.view === 'mywork') { html = viewMyWork(); title = 'My Work'; }
+    else if (r.view === 'sections') { html = viewSections(); title = 'Manage sections'; }
+    else if (r.view === 'team') { html = viewTeam(); title = 'Users & access'; }
+    else { html = viewDashboard(); nav = 'dashboard'; }
+    renderNav(nav);
     const board = $('.board', main);
     const keepLeft = board ? board.scrollLeft : 0;
     const keepTop = window.scrollY;
-    const views = { dashboard: viewDashboard, rfq: viewRfq, projects: viewProjects, project: () => viewProject(id), tasks: viewMyTasks, claims: viewClaims, users: viewUsers };
-    main.innerHTML = demoBanner() + (views[view] || viewDashboard)();
+    main.innerHTML = demoBanner() + html;
     const nb = $('.board', main);
     if (nb && keepLeft) nb.scrollLeft = keepLeft;
-    if (S._sameView === view + id) window.scrollTo(0, keepTop);
-    S._sameView = view + id;
-    document.title = ({ dashboard: 'Dashboard', rfq: 'RFQ & Tender', projects: 'Projects', project: 'Project', tasks: 'My Tasks', claims: 'Payments & Claims', users: 'Team & Access' }[view] || 'Dashboard') + ' · Project Hub';
+    if (S._last === location.hash) window.scrollTo(0, keepTop);
+    S._last = location.hash;
+    document.title = title + ' · Project Hub';
   }
-
-  // ------------------------------------------------------------ dashboard
 
   function kpi(value, label, sub, cls) {
     return `<div class="kpi"><div class="v ${cls || ''}">${value}</div><div class="l">${label}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
   }
 
+  // ------------------------------------------------------------ dashboard
+
   function viewDashboard() {
-    const d = S.data;
-    const open = d.rfqs.filter((r) => PRE.includes(r.stage));
-    const soon = open.filter((r) => { const h = hoursUntil(r.closingDate); return h !== null && h >= 0 && h <= 72; });
-    const missed = open.filter((r) => { const h = hoursUntil(r.closingDate); return h !== null && h < 0; });
-    const won = d.rfqs.filter((r) => r.outcome === 'Awarded').length;
-    const lost = d.rfqs.filter((r) => r.outcome === 'Lost').length;
-    const pipeline = sum(d.rfqs.filter((r) => (PRE.includes(r.stage) || SUB.includes(r.stage)) && r.outcome === 'Pending'), (r) => r.estValue);
-    const active = d.projects.filter((p) => p.status === 'Active');
-    const risky = active.filter((p) => p.health !== 'On track');
-    const openTasks = d.tasks.filter((t) => t.status !== 'Done');
-    const lateTasks = openTasks.filter((t) => t.dueDate && daysFromToday(t.dueDate) < 0);
-    const lateMs = lateTasks.filter((t) => t.isMilestone);
-    const outstanding = sum(d.claims, claimOutstanding);
-    const overdueClaims = d.claims.filter(claimOverdue);
-    const thisMonth = monthKey(today());
-    const receivedMonth = sum(d.claims.filter((c) => c.paidDate && monthKey(c.paidDate) === thisMonth), (c) => c.paidAmount);
+    const secs = liveSections().filter(hasSectionAccess);
+    const assigned = S.items.filter((it) => { const s = sectionOf(it); return s && !s.archived && involved(it) && !isDone(s, it); });
+    const pool = new Map();
+    secs.forEach((s) => S.items.filter((it) => it.sectionId === s.id).forEach((it) => pool.set(it.id, it)));
+    assigned.forEach((it) => pool.set(it.id, it));
 
-    // Needs attention — most urgent first
-    const items = [];
-    missed.forEach((r) => items.push({ sev: 'crit', w: 0, title: r.rfqNo + ' · ' + r.title, meta: 'RFQ closing date passed, not submitted · ' + userName(r.assignee), e: 'rfqs', id: r.id }));
-    soon.forEach((r) => items.push({ sev: hoursUntil(r.closingDate) <= 24 ? 'crit' : 'warn', w: 1 + hoursUntil(r.closingDate) / 100, title: r.rfqNo + ' · ' + r.title, meta: rfqClosing(r).text + ' · ' + stageLabel(r.stage) + ' · ' + userName(r.assignee), e: 'rfqs', id: r.id }));
-    open.forEach((r) => { const a = rfqAging(r); if (a && a.cls === 'crit' && !items.some((i) => i.id === r.id)) items.push({ sev: 'warn', w: 3, title: r.rfqNo + ' · ' + r.title, meta: a.text + ' in Pending · ' + userName(r.assignee), e: 'rfqs', id: r.id }); });
-    lateMs.forEach((t) => items.push({ sev: 'crit', w: 2, title: '◆ ' + t.title, meta: 'Milestone late ' + -daysFromToday(t.dueDate) + 'd · ' + projectName(t.projectId), e: 'tasks', id: t.id }));
-    overdueClaims.forEach((c) => items.push({ sev: 'crit', w: 2.5, title: c.claimNo + ' · ' + projectName(c.projectId), meta: 'Payment overdue ' + -daysFromToday(claimDue(c)) + 'd · ' + money0(claimOutstanding(c)), e: 'claims', id: c.id }));
-    lateTasks.filter((t) => !t.isMilestone).forEach((t) => items.push({ sev: 'warn', w: 4, title: t.title, meta: 'Task late ' + -daysFromToday(t.dueDate) + 'd · ' + userName(t.assignee), e: 'tasks', id: t.id }));
-    items.sort((a, b) => (a.sev === b.sev ? a.w - b.w : a.sev === 'crit' ? -1 : 1));
-    const shown = items.slice(0, 12);
+    const attention = [];
+    pool.forEach((it) => {
+      const s = sectionOf(it);
+      if (isDone(s, it)) return;
+      const d = dueInfo(s, it);
+      const a = ageInfo(s, it);
+      const worst = [d, a].filter((x) => x && x.sev >= 1).sort((x, y) => y.sev - x.sev)[0];
+      if (worst) attention.push({ it, s, info: worst, other: worst === d ? a : d });
+    });
+    attention.sort((x, y) => y.info.sev - x.info.sev || (involved(y.it) ? 1 : 0) - (involved(x.it) ? 1 : 0));
+    const crit = attention.filter((a) => a.info.sev === 2).length;
+    const shown = attention.slice(0, 12);
+    const hour = new Date().getHours();
 
-    // Workload by person
-    const people = d.users.filter((u) => u.active !== false).map((u) => ({
-      u,
-      rfq: open.filter((r) => r.assignee === u.id).length,
-      task: openTasks.filter((t) => t.assignee === u.id && !(t.dueDate && daysFromToday(t.dueDate) < 0)).length,
-      late: lateTasks.filter((t) => t.assignee === u.id).length,
-    })).filter((p) => p.rfq + p.task + p.late > 0).sort((a, b) => (b.rfq + b.task + b.late) - (a.rfq + a.task + a.late));
-    const maxLoad = Math.max(1, ...people.map((p) => p.rfq + p.task + p.late));
+    if (!S.sections.length) {
+      return `<div class="head"><div><h1>Welcome, ${esc(S.me.name || '')}</h1></div></div>` + (S.me.isSuper
+        ? `<div class="empty-state"><b>No sections yet</b>Start with the standard ones (RFQ & Tender, Projects, Project Tasks, Payment & Claims) and adjust their columns afterwards.<div style="margin-top:14px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn primary" data-act="seed-sections">Create the standard sections</button><a class="btn" href="#sections">Start from scratch</a></div></div>`
+        : '<div class="empty-state"><b>Nothing shared with you yet</b>The super admin has not given your account access to any section. Ask them to add you.</div>');
+    }
 
-    const projRows = d.projects.filter((p) => p.status !== 'Completed').map((p) => {
-      const f = projectFinance(p);
-      const tl = d.tasks.filter((t) => t.projectId === p.id);
-      const late = tl.filter((t) => t.status !== 'Done' && t.dueDate && daysFromToday(t.dueDate) < 0).length;
-      return `<tr data-act="go" data-href="#project/${esc(p.id)}">
-        <td class="title">${esc(p.name)}<div class="muted mono">${esc(p.code)}</div></td>
-        <td><span class="pill ${healthCls(p.health)}">${esc(p.health)}</span></td>
-        <td style="min-width:110px"><div class="bar"><i style="width:${Math.min(100, Number(p.progressPct) || 0)}%"></i></div><small class="muted num">${Number(p.progressPct) || 0}% physical</small></td>
-        <td class="r">${moneyShort(f.received)}<div class="muted">${pct(f.received, f.revised)}% of ${moneyShort(f.revised)}</div></td>
-        <td class="r">${late ? `<span class="chip crit">${late} late</span>` : '<span class="muted">—</span>'}</td>
-      </tr>`;
+    const cards = secs.map((s) => {
+      const its = S.items.filter((it) => it.sectionId === s.id);
+      const open = its.filter((it) => !isDone(s, it));
+      const late = open.filter((it) => { const d = dueInfo(s, it); return d && d.sev === 2; }).length;
+      const stuck = open.filter((it) => { const a = ageInfo(s, it); return a; }).length;
+      const sf = stageF(s);
+      const totals = s.fields.filter((f) => f.total).slice(0, 2);
+      const segs = sf ? sf.options.map((o) => ({ o, n: its.filter((it) => val(it, sf) === o.value).length })).filter((x) => x.n) : [];
+      return `<a class="scard" href="#s/${esc(s.id)}">
+        <div class="sc-h">${secMark(s)}<b>${esc(s.name)}</b><span class="chip">${LEVEL_LABEL[myLevel(s)]}</span></div>
+        <div class="sc-n">${kpi(open.length, 'Open', its.length + ' in total')}${kpi(late, 'Late', 'past due date', late ? 'crit' : '')}${kpi(stuck, 'Waiting', 'too long in a stage', stuck ? 'warn' : '')}</div>
+        ${totals.length ? `<div class="sc-t">${totals.map((f) => `<span>${esc(f.label)} <b>${moneyShortOrNum(f, sum(open, (it) => val(it, f)))}</b> open</span>`).join('')}</div>` : ''}
+        ${segs.length ? `<div class="segbar" title="Items by ${esc(sf.label)}">${segs.map((x) => `<i class="f-${x.o.color}" style="flex:${x.n}" title="${esc(x.o.label)}: ${x.n}"></i>`).join('')}</div>
+          <div class="seglegend">${segs.slice(0, 6).map((x) => `<span><i class="f-${x.o.color}"></i>${esc(x.o.label)} ${x.n}</span>`).join('')}${segs.length > 6 ? `<span>+${segs.length - 6} more</span>` : ''}</div>` : ''}
+      </a>`;
     }).join('');
 
     return `
-      <div class="head"><div><h1>Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'}, ${esc((S.me.name || '').split(' ')[0] || 'there')}</h1>
-        <div class="sub">${fmtDate(today())} · ${items.filter((i) => i.sev === 'crit').length} urgent, ${items.filter((i) => i.sev === 'warn').length} to watch</div></div></div>
-      <section class="kpis">
-        <div class="kgroup"><h3>Tendering</h3><div class="krow">
-          ${kpi(open.length, 'Open RFQs', soon.length + ' closing in 72h', soon.length ? 'warn' : '')}
-          ${kpi(won + lost ? pct(won, won + lost) + '%' : '—', 'Win rate', won + ' won · ' + lost + ' lost')}
-          ${kpi(moneyShort(pipeline), 'Pipeline', 'est. value, undecided')}
-        </div></div>
-        <div class="kgroup"><h3>Delivery</h3><div class="krow">
-          ${kpi(active.length, 'Active projects', risky.length + ' at risk or off track', risky.length ? 'warn' : '')}
-          ${kpi(lateMs.length, 'Late milestones', 'across all projects', lateMs.length ? 'crit' : '')}
-          ${kpi(lateTasks.length, 'Late tasks', openTasks.length + ' open in total', lateTasks.length ? 'warn' : '')}
-        </div></div>
-        <div class="kgroup"><h3>Cash</h3><div class="krow">
-          ${kpi(moneyShort(outstanding), 'Outstanding', 'submitted, not yet received')}
-          ${kpi(overdueClaims.length, 'Overdue payments', moneyShort(sum(overdueClaims, claimOutstanding)), overdueClaims.length ? 'crit' : '')}
-          ${kpi(moneyShort(receivedMonth), 'Received', 'this month')}
-        </div></div>
-      </section>
+      <div class="head"><div><h1>Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}, ${esc((S.me.name || '').split(' ')[0] || 'there')}</h1>
+        <div class="sub">${fmtDate(today())} · ${secs.length} section${secs.length === 1 ? '' : 's'} shared with you · ${crit} urgent, ${attention.length - crit} to watch</div></div></div>
+      ${secs.length ? `<div class="scards">${cards}</div>` : `<div class="empty-state"><b>No section access</b>You can still see the items you are assigned to under My Work.</div>`}
       <div class="grid2">
         <section class="panel">
-          <div class="ph"><h2>Needs attention</h2><span class="muted">${items.length} item${items.length === 1 ? '' : 's'}</span></div>
-          ${shown.length ? `<ul class="alerts">${shown.map((i) => `
-            <li data-act="open" data-entity="${i.e}" data-id="${esc(i.id)}"><span class="sev ${i.sev}"></span>
-              <div style="min-width:0"><div class="at">${esc(i.title)}</div><div class="am">${esc(i.meta)}</div></div><span class="chip ${i.sev}">${i.e === 'rfqs' ? 'RFQ' : i.e === 'claims' ? 'Claim' : 'Task'}</span></li>`).join('')}</ul>
-            ${items.length > shown.length ? `<div class="muted">and ${items.length - shown.length} more</div>` : ''}`
-          : '<div class="empty">Nothing urgent. All RFQs, milestones and payments are on time.</div>'}
+          <div class="ph"><h2>Needs attention</h2><span class="muted">${attention.length} item${attention.length === 1 ? '' : 's'}</span></div>
+          ${shown.length ? `<ul class="alerts">${shown.map((a) => `
+            <li data-act="open" data-id="${esc(a.it.id)}"><span class="sev ${a.info.cls}"></span>
+              <div style="min-width:0"><div class="at">${esc(a.it.title)}</div><div class="am">${esc(a.s.name)} · ${esc(a.info.text)}${a.other ? ' · ' + esc(a.other.text) : ''}</div></div>
+              ${avatars(a.it.editors || [], 2)}</li>`).join('')}</ul>${attention.length > shown.length ? `<div class="muted">and ${attention.length - shown.length} more</div>` : ''}`
+          : '<div class="empty">Nothing late or waiting too long.</div>'}
         </section>
-        <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
-          <section class="panel">
-            <div class="ph"><h2>Projects</h2><a href="#projects">All projects</a></div>
-            ${projRows ? `<div class="tablewrap"><table class="t"><thead><tr><th>Project</th><th>Health</th><th>Progress</th><th class="r">Received</th><th class="r">Tasks</th></tr></thead><tbody>${projRows}</tbody></table></div>`
-              : '<div class="empty">No live projects yet. Add one under Projects.</div>'}
-          </section>
-          <section class="panel">
-            <div class="ph"><h2>Team workload</h2><div class="legend"><span><i style="background:#4f8fb0"></i>Open RFQs</span><span><i style="background:#8bb7cc"></i>Open tasks</span><span><i style="background:var(--crit)"></i>Late</span></div></div>
-            ${people.length ? `<div class="load">${people.map((p) => `
-              <div class="row"><div class="nm">${avatar(p.u.id)}<span>${esc(p.u.name || p.u.id)}</span></div>
-                <div class="stack" style="width:${Math.max(6, ((p.rfq + p.task + p.late) / maxLoad) * 100)}%">
-                  <i class="s1" style="flex:${p.rfq}"></i><i class="s2" style="flex:${p.task}"></i><i class="s3" style="flex:${p.late}"></i></div>
-                <span class="muted num" style="text-align:right">${p.rfq} · ${p.task}${p.late ? ` · <b style="color:var(--crit)">${p.late}</b>` : ''}</span></div>`).join('')}</div>`
-              : '<div class="empty">No open work assigned yet.</div>'}
-          </section>
-        </div>
+        <section class="panel">
+          <div class="ph"><h2>My open work</h2><a href="#mywork">See all</a></div>
+          ${assigned.length ? `<ul class="alerts">${assigned.slice().sort(byDue).slice(0, 8).map((it) => { const s = sectionOf(it); const d = dueInfo(s, it); return `
+            <li data-act="open" data-id="${esc(it.id)}"><span class="sev ${d && d.sev ? d.cls : 'none'}"></span>
+              <div style="min-width:0"><div class="at">${esc(it.title)}</div><div class="am">${esc(s.name)} · ${esc(roleOn(it))}</div></div>${chip(d)}</li>`; }).join('')}</ul>`
+          : '<div class="empty">Nothing assigned to you right now.</div>'}
+        </section>
       </div>`;
   }
+  function moneyShortOrNum(f, n) { return f.type === 'currency' ? moneyShort(n) : nf.format(n); }
+  function dueValue(it) { const s = sectionOf(it); const f = s && dueF(s); return (f && val(it, f)) || '9999'; }
+  function byDue(a, b) { return dueValue(a).localeCompare(dueValue(b)); }
 
-  // ------------------------------------------------------------ RFQ & tender
+  // ------------------------------------------------------------ section
 
-  function rfqFiltered() {
-    const q = S.f.rfqQuery.toLowerCase();
-    return S.data.rfqs.filter((r) =>
-      (S.f.rfqMonth === 'all' || monthKey(r.closingDate) === S.f.rfqMonth) &&
-      (S.f.rfqCat === 'all' || r.category === S.f.rfqCat) &&
-      (S.f.rfqWho === 'all' || (S.f.rfqWho === 'me' ? r.assignee === S.me.id : r.assignee === S.f.rfqWho)) &&
-      (!q || [r.rfqNo, r.title, r.client, r.notes].join(' ').toLowerCase().includes(q)));
+  function sectionFilter(s) {
+    const q = S.f.q.toLowerCase();
+    return S.items.filter((it) => it.sectionId === s.id &&
+      (S.f.who !== 'mine' || involved(it)) &&
+      (!q || [it.title].concat(s.fields.filter((f) => ['text', 'longtext', 'url'].includes(f.type)).map((f) => val(it, f))).join(' ').toLowerCase().includes(q)));
   }
 
-  function viewRfq() {
-    const months = [...new Set(S.data.rfqs.map((r) => monthKey(r.closingDate)).filter(Boolean))].sort().reverse();
-    const users = S.data.users.filter((u) => u.active !== false);
+  function viewSection(id) {
+    const s = section(id);
+    if (!s || (s.archived && !S.me.isSuper)) return '<div class="empty-state"><b>Section not found</b>It may have been removed, or you no longer have access. <a href="#dashboard">Back to the dashboard</a></div>';
+    const lvl = myLevel(s);
+    const all = S.items.filter((it) => it.sectionId === s.id);
+    const view = stageF(s) ? (S.f.view[s.id] || 'board') : 'table';
     return `
-      <div class="head"><div><h1>RFQ &amp; Tender</h1><div class="sub">Every enquiry from receipt to award. Drag a card to move it to the next stage.</div></div>
-        ${canWrite() ? '<button class="btn primary" data-act="new" data-entity="rfqs">+ New RFQ</button>' : ''}</div>
+      ${s.archived ? '<div class="banner"><b>Removed section</b><span>Only you can see it. Restore it under Manage sections.</span></div>' : ''}
+      <div class="head"><div><h1>${esc(s.name)}</h1>
+        <div class="sub">${all.length} item${all.length === 1 ? '' : 's'}${hasSectionAccess(s) ? ` · your access: ${LEVEL_LABEL[lvl]}` : ' · you see only the items you are assigned to'}</div></div>
+        <div class="toolbar">
+          ${can.template(ctx(), s) ? `<a class="btn" href="#s/${esc(s.id)}/customize">Customize columns</a>` : ''}
+          ${can.create(ctx(), s) ? `<button class="btn primary" data-act="new" data-section="${esc(s.id)}">+ New item</button>` : ''}
+        </div></div>
       <div class="toolbar">
-        <div class="grow"><input type="search" id="rfqQuery" placeholder="Search RFQ no., title or client" value="${esc(S.f.rfqQuery)}" data-filter-input="rfqQuery" aria-label="Search RFQs"></div>
-        <select id="rfqMonth" data-filter="rfqMonth" aria-label="Closing month"><option value="all">All closing months</option>${months.map((m) => `<option value="${m}"${S.f.rfqMonth === m ? ' selected' : ''}>${monthLabel(m)}</option>`).join('')}</select>
-        <select id="rfqCat" data-filter="rfqCat" aria-label="Category"><option value="all">Supply + Project/Service</option>${RFQ_CATEGORIES.map((c) => `<option${S.f.rfqCat === c ? ' selected' : ''}>${c}</option>`).join('')}</select>
-        <select id="rfqWho" data-filter="rfqWho" aria-label="Assigned to"><option value="all">Everyone</option><option value="me"${S.f.rfqWho === 'me' ? ' selected' : ''}>Assigned to me</option>${users.map((u) => `<option value="${esc(u.id)}"${S.f.rfqWho === u.id ? ' selected' : ''}>${esc(u.name || u.id)}</option>`).join('')}</select>
-        <div class="seg" role="group" aria-label="View"><button type="button" class="${S.f.rfqView === 'board' ? 'on' : ''}" data-act="rfq-view" data-v="board">Board</button><button type="button" class="${S.f.rfqView === 'table' ? 'on' : ''}" data-act="rfq-view" data-v="table">Table</button></div>
+        <div class="grow"><input type="search" id="secQuery" placeholder="Search ${esc(s.name)}" value="${esc(S.f.q)}" data-filter-input="q" aria-label="Search"></div>
+        <select id="secWho" data-filter="who" aria-label="Show"><option value="all">All items</option><option value="mine"${S.f.who === 'mine' ? ' selected' : ''}>Only mine</option></select>
+        ${stageF(s) ? `<div class="seg" role="group" aria-label="View"><button type="button" class="${view === 'board' ? 'on' : ''}" data-act="view" data-v="board" data-section="${esc(s.id)}">Board</button><button type="button" class="${view === 'table' ? 'on' : ''}" data-act="view" data-v="table" data-section="${esc(s.id)}">Table</button></div>` : ''}
       </div>
-      <div id="rfqBody">${rfqBody()}</div>`;
+      <div id="secBody" data-section="${esc(s.id)}">${sectionBody(s)}</div>`;
   }
 
-  function rfqBody() {
-    const list = rfqFiltered();
-    if (!S.data.rfqs.length) {
-      return `<div class="empty-state"><b>No RFQs yet</b>Add the first enquiry with “+ New RFQ”. It starts in To Do and moves across the board as the tender progresses.</div>`;
-    }
-    const open = list.filter((r) => PRE.includes(r.stage));
-    const stat = `<div class="statline"><span><b>${list.length}</b> shown</span><span><b>${open.length}</b> in preparation</span>
-      <span><b>${list.filter((r) => SUB.includes(r.stage)).length}</b> submitted</span>
-      <span><b>${list.filter((r) => r.outcome === 'Awarded').length}</b> awarded</span>
-      <span>Est. value in preparation <b>${moneyShort(sum(open, (r) => r.estValue))}</b></span></div>`;
-    if (S.f.rfqView === 'table') return stat + rfqTable(list);
-    const drag = canWrite();
-    return stat + `<div class="board">${RFQ_STAGES.map((s) => {
-      const cards = list.filter((r) => r.stage === s.key).sort((a, b) => (a.closingDate || '9').localeCompare(b.closingDate || '9'));
-      return `<section class="col" data-drop="${s.key}" data-drop-field="stage" data-drop-entity="rfqs">
-        <div class="col-h"><b>${s.label}</b><span class="n">${cards.length}</span>${cards.length ? `<span class="sum">${moneyShort(sum(cards, (r) => r.estValue))}</span>` : ''}</div>
-        <div class="col-b">${cards.map((r) => rfqCard(r, drag)).join('') || '<div class="none">Drop a card here</div>'}</div>
+  function sectionBody(s) {
+    const list = sectionFilter(s);
+    const all = S.items.filter((it) => it.sectionId === s.id);
+    if (!all.length) return `<div class="empty-state"><b>No items yet</b>${can.create(ctx(), s) ? 'Add the first one with “+ New item”.' : 'Items appear here once someone adds them.'}</div>`;
+    const totals = s.fields.filter((f) => f.total);
+    const open = list.filter((it) => !isDone(s, it));
+    const stat = `<div class="statline"><span><b>${list.length}</b> shown</span><span><b>${open.length}</b> open</span>
+      ${totals.map((f) => `<span>${esc(f.label)} (open) <b>${moneyShortOrNum(f, sum(open, (it) => val(it, f)))}</b></span>`).join('')}</div>`;
+    const view = stageF(s) ? (S.f.view[s.id] || 'board') : 'table';
+    return stat + (view === 'board' ? board(s, list) : table(s, list));
+  }
+
+  function board(s, list) {
+    const sf = stageF(s);
+    const total = s.fields.find((f) => f.total);
+    const cols = sf.options.map((o) => ({ value: o.value, label: o.label, color: o.color }));
+    if (list.some((it) => !optOf(sf, val(it, sf)))) cols.push({ value: '', label: 'No ' + sf.label.toLowerCase(), color: 'gray' });
+    return `<div class="board">${cols.map((c) => {
+      const cards = list.filter((it) => (optOf(sf, val(it, sf)) ? val(it, sf) : '') === c.value).sort(byDue);
+      return `<section class="col" data-drop-stage="${esc(c.value)}" data-drop-section="${esc(s.id)}">
+        <div class="col-h"><i class="dot f-${c.color}"></i><b>${esc(c.label)}</b><span class="n">${cards.length}</span>${total && cards.length ? `<span class="sum">${moneyShortOrNum(total, sum(cards, (it) => val(it, total)))}</span>` : ''}</div>
+        <div class="col-b">${cards.map((it) => card(s, it)).join('') || '<div class="none">Drop a card here</div>'}</div>
       </section>`;
     }).join('')}</div>`;
   }
 
-  function rfqCard(r, drag) {
-    const nComments = S.data.comments.filter((c) => c.entity === 'rfqs' && c.entityId === r.id && c.kind !== 'log').length;
-    const outcome = r.outcome && r.outcome !== 'Pending' ? `<span class="chip ${r.outcome === 'Awarded' ? 'ok' : r.outcome === 'Lost' ? 'crit' : ''}">${esc(r.outcome)}</span>` : '';
-    return `<article class="card" tabindex="0" ${drag ? `draggable="true" data-drag="rfqs:${esc(r.id)}"` : ''} data-act="open" data-entity="rfqs" data-id="${esc(r.id)}">
-      <div class="top"><span class="no">${esc(r.rfqNo)}</span><span class="chip ${r.category === 'Supply' ? '' : 'info'}">${r.category === 'Supply' ? 'Supply' : 'Proj/Svc'}</span></div>
-      <div class="tt">${esc(r.title)}</div>
-      ${r.client ? `<div class="cl">${esc(r.client)}${r.estValue ? ' · ' + moneyShort(r.estValue) : ''}</div>` : ''}
-      <div class="ft">${chip(rfqClosing(r))}${chip(rfqAging(r))}${outcome}
-        ${r.files && r.files.length ? `<span class="meta" title="Attachments">📎${r.files.length}</span>` : ''}
+  function card(s, it) {
+    const fields = s.fields.filter((f) => f.onCard && f.key !== 'title' && f.key !== s.stageField);
+    const mono = fields.find((f) => f.type === 'text');
+    const meta = [];
+    const chips = [];
+    let people = [];
+    fields.forEach((f) => {
+      if (f === mono) return;
+      const v = val(it, f);
+      if (blank(v) || v === false) return;
+      if (['select', 'checkbox'].includes(f.type)) chips.push(show(s, it, f, 'card'));
+      else if (f.type === 'person') people.push(v);
+      else if (f.due) return;
+      else meta.push(f.type === 'date' || f.type === 'datetime' ? esc(f.label) + ' ' + show(s, it, f, 'card') : show(s, it, f, 'card'));
+    });
+    people = people.concat(it.editors || []);
+    const nComments = S.comments.filter((c) => c.itemId === it.id && c.kind !== 'log').length;
+    const drag = can.editItem(ctx(), it, s);
+    return `<article class="card" tabindex="0" ${drag ? `draggable="true" data-drag="${esc(it.id)}"` : ''} data-act="open" data-id="${esc(it.id)}">
+      ${mono && val(it, mono) ? `<div class="no">${esc(val(it, mono))}</div>` : ''}
+      <div class="tt">${esc(it.title)}</div>
+      ${meta.length ? `<div class="cl">${meta.join(' · ')}</div>` : ''}
+      <div class="ft">${chip(dueInfo(s, it))}${chip(ageInfo(s, it))}${chips.join('')}
+        ${(it.files || []).length ? `<span class="meta" title="Attachments">📎${it.files.length}</span>` : ''}
         ${nComments ? `<span class="meta" title="Comments">💬${nComments}</span>` : ''}
-        <span class="sp"></span>${avatar(r.assignee)}</div>
+        <span class="sp"></span>${avatars(people, 3)}</div>
     </article>`;
   }
 
-  function rfqTable(list) {
-    if (!list.length) return '<div class="empty-state"><b>No RFQs match these filters</b>Clear the search or pick another month.</div>';
-    const rows = list.slice().sort((a, b) => (b.closingDate || '').localeCompare(a.closingDate || '')).map((r) => `
-      <tr data-act="open" data-entity="rfqs" data-id="${esc(r.id)}">
-        <td class="mono nw">${esc(r.rfqNo)}</td><td class="title">${esc(r.title)}</td><td>${esc(r.client)}</td>
-        <td class="nw">${esc(r.category)}</td><td class="nw">${esc(stageLabel(r.stage))} ${chip(rfqAging(r))}</td>
-        <td class="nw">${avatar(r.assignee)} ${esc(userName(r.assignee))}</td>
-        <td class="nw">${fmtDT(r.closingDate)} ${PRE.includes(r.stage) ? chip(rfqClosing(r) && rfqClosing(r).cls ? rfqClosing(r) : null) : ''}</td>
-        <td class="r">${r.estValue ? money0(r.estValue) : '—'}</td><td class="nw">${esc(r.outcome || '')}</td></tr>`).join('');
-    return `<div class="tablewrap"><table class="t"><thead><tr><th>RFQ no.</th><th>Title</th><th>Client</th><th>Category</th><th>Stage</th><th>Assigned</th><th>Closing</th><th class="r">Est. value</th><th>Outcome</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  function table(s, list) {
+    if (!list.length) return '<div class="empty-state"><b>Nothing matches</b>Clear the search or switch to All items.</div>';
+    const cols = s.fields.filter((f) => f.type !== 'longtext');
+    const rows = list.slice().sort(byDue).map((it) => `
+      <tr data-act="open" data-id="${esc(it.id)}">${cols.map((f) => `<td class="${f.key === 'title' ? 'title' : ['currency', 'number'].includes(f.type) ? 'r' : 'nw'}">${f.key === 'title' ? esc(it.title) + (ageInfo(s, it) ? ' ' + chip(ageInfo(s, it)) : '') : show(s, it, f, 'table')}</td>`).join('')}
+        <td class="nw">${avatars(it.editors || [], 3)}</td></tr>`).join('');
+    const totals = cols.some((f) => f.total);
+    return `<div class="tablewrap"><table class="t"><thead><tr>${cols.map((f) => `<th class="${['currency', 'number'].includes(f.type) ? 'r' : ''}">${esc(f.label)}</th>`).join('')}<th>Editors</th></tr></thead>
+      <tbody>${rows}</tbody>${totals ? `<tfoot><tr>${cols.map((f, i) => `<td class="${f.total ? 'r' : ''}">${f.total ? moneyShortOrNum(f, sum(list, (it) => val(it, f))) : i === 0 ? 'Total' : ''}</td>`).join('')}<td></td></tr></tfoot>` : ''}</table></div>`;
   }
 
-  // ------------------------------------------------------------ projects
+  // ------------------------------------------------------------ my work
 
-  function viewProjects() {
-    const list = S.data.projects.filter((p) => S.f.projStatus === 'all' || (S.f.projStatus === 'live' ? p.status !== 'Completed' : p.status === S.f.projStatus));
-    const rows = list.map((p) => {
-      const f = projectFinance(p);
-      const tl = S.data.tasks.filter((t) => t.projectId === p.id);
-      const done = tl.filter((t) => t.status === 'Done').length;
-      return `<tr data-act="go" data-href="#project/${esc(p.id)}">
-        <td class="mono nw">${esc(p.code)}</td><td class="title">${esc(p.name)}<div class="muted">${esc(p.client)}</div></td>
-        <td class="nw">${avatar(p.pm)} ${esc(userName(p.pm))}</td><td class="nw">${esc(p.status)}</td>
-        <td><span class="pill ${healthCls(p.health)}">${esc(p.health)}</span></td>
-        <td style="min-width:120px"><div class="bar"><i style="width:${Math.min(100, Number(p.progressPct) || 0)}%"></i></div><small class="muted num">${Number(p.progressPct) || 0}% · ${done}/${tl.length} tasks</small></td>
-        <td class="r">${money0(f.revised)}</td><td class="r">${money0(f.received)}<div class="muted">${pct(f.received, f.revised)}%</div></td>
-        <td class="nw">${fmtDate(p.endDate)}</td></tr>`;
-    }).join('');
-    return `
-      <div class="head"><div><h1>Projects</h1><div class="sub">${S.data.projects.filter((p) => p.status === 'Active').length} active · contract value ${moneyShort(sum(S.data.projects.filter((p) => p.status !== 'Completed'), (p) => (Number(p.contractValue) || 0) + (Number(p.voValue) || 0)))}</div></div>
-        <div class="toolbar">
-          <select id="projStatus" data-filter="projStatus" aria-label="Status"><option value="live"${S.f.projStatus === 'live' ? ' selected' : ''}>Not completed</option><option value="all"${S.f.projStatus === 'all' ? ' selected' : ''}>All projects</option>${PROJECT_STATUS.map((s) => `<option${S.f.projStatus === s ? ' selected' : ''}>${s}</option>`).join('')}</select>
-          ${canWrite() ? '<button class="btn primary" data-act="new" data-entity="projects">+ New project</button>' : ''}
-        </div></div>
-      ${rows ? `<div class="tablewrap"><table class="t"><thead><tr><th>Code</th><th>Project</th><th>PM</th><th>Status</th><th>Health</th><th>Progress</th><th class="r">Revised contract</th><th class="r">Received</th><th>Completion</th></tr></thead><tbody>${rows}</tbody></table></div>`
-        : '<div class="empty-state"><b>No projects here</b>Add a project when a tender is awarded. Tasks, milestones and claims all hang off it.</div>'}`;
-  }
-
-  function viewProject(id) {
-    const p = find('projects', id);
-    if (!p) return '<div class="empty-state"><b>Project not found</b>It may have been deleted. <a href="#projects">Back to projects</a></div>';
-    const f = projectFinance(p);
-    const tasks = S.data.tasks.filter((t) => t.projectId === p.id);
-    const ms = tasks.filter((t) => t.isMilestone);
-    const claims = S.data.claims.filter((c) => c.projectId === p.id);
-    const done = tasks.filter((t) => t.status === 'Done').length;
-    const tab = S.f.projTab;
-    const tabBtn = (k, label, n) => `<button type="button" class="${tab === k ? 'on' : ''}" data-act="tab" data-tab="${k}">${label}<span class="n">${n}</span></button>`;
-    let body = '';
-    if (tab === 'milestones') body = milestoneTable(ms, p);
-    else if (tab === 'claims') body = claimTable(claims, false, p);
-    else body = taskBoard(tasks, p);
-    const daysLeft = daysFromToday(p.endDate);
-    return `
-      <div class="head"><div><div class="crumb"><a href="#projects">Projects</a> / <span class="mono">${esc(p.code)}</span></div>
-        <h1>${esc(p.name)}</h1>
-        <div class="sub">${esc(p.client || 'No client set')} · PM ${esc(userName(p.pm))} · <span class="pill ${healthCls(p.health)}">${esc(p.health)}</span> · ${fmtDate(p.startDate)} → ${fmtDate(p.endDate)}${p.endDate && p.status !== 'Completed' ? ` (${daysLeft < 0 ? -daysLeft + ' days past completion' : daysLeft + ' days left'})` : ''}</div></div>
-        <button class="btn" data-act="open" data-entity="projects" data-id="${esc(p.id)}">${canWrite() ? 'Edit project' : 'Project details'}</button></div>
-      <div class="strip">
-        ${kpi(moneyShort(f.revised), 'Revised contract', p.voValue ? 'incl. VO ' + moneyShort(p.voValue) : 'no VO yet')}
-        ${kpi(pct(f.claimed, f.revised) + '%', 'Claimed to date', moneyShort(f.claimed))}
-        ${kpi(moneyShort(f.received), 'Received', pct(f.received, f.revised) + '% of contract')}
-        ${kpi(moneyShort(f.outstanding), 'Outstanding', f.overdue.length ? f.overdue.length + ' overdue' : 'none overdue', f.overdue.length ? 'crit' : '')}
-        ${kpi((Number(p.progressPct) || 0) + '%', 'Physical progress', 'retention held ' + moneyShort(f.retention))}
-        ${kpi(done + '/' + tasks.length, 'Tasks done', ms.filter((t) => t.status !== 'Done' && t.dueDate && daysFromToday(t.dueDate) < 0).length + ' late milestones')}
-      </div>
-      <div class="tabs">${tabBtn('tasks', 'Tasks', tasks.filter((t) => t.status !== 'Done').length)}${tabBtn('milestones', 'Milestones', ms.length)}${tabBtn('claims', 'Claims', claims.length)}</div>
-      ${body}`;
-  }
-
-  function taskCard(t, drag, showProject) {
-    return `<article class="card" tabindex="0" ${drag ? `draggable="true" data-drag="tasks:${esc(t.id)}"` : ''} data-act="open" data-entity="tasks" data-id="${esc(t.id)}">
-      <div class="tt">${t.isMilestone ? '<span class="ms" title="Milestone">◆</span> ' : ''}${esc(t.title)}</div>
-      ${showProject ? `<div class="cl">${esc(projectName(t.projectId))}</div>` : ''}
-      <div class="ft">${chip(taskDue(t))}${t.priority === 'Urgent' || t.priority === 'High' ? `<span class="chip ${t.priority === 'Urgent' ? 'crit' : 'warn'}">${esc(t.priority)}</span>` : ''}
-        ${t.files && t.files.length ? `<span class="meta">📎${t.files.length}</span>` : ''}<span class="sp"></span>${avatar(t.assignee)}</div>
-    </article>`;
-  }
-
-  function taskBoard(tasks, p) {
-    const drag = canWrite();
-    const add = canWrite() ? `<div class="toolbar"><button class="btn primary sm" data-act="new" data-entity="tasks" data-project="${esc(p.id)}">+ Add task</button><button class="btn sm" data-act="new" data-entity="tasks" data-project="${esc(p.id)}" data-milestone="1">+ Add milestone</button></div>` : '';
-    return add + `<div class="board">${TASK_STATUS.map((s) => {
-      const cards = tasks.filter((t) => t.status === s).sort((a, b) => (a.dueDate || '9').localeCompare(b.dueDate || '9'));
-      return `<section class="col" data-drop="${s}" data-drop-field="status" data-drop-entity="tasks">
-        <div class="col-h"><b>${s}</b><span class="n">${cards.length}</span></div>
-        <div class="col-b">${cards.map((t) => taskCard(t, drag)).join('') || '<div class="none">No tasks</div>'}</div></section>`;
-    }).join('')}</div>`;
-  }
-
-  function milestoneTable(ms, p) {
-    const add = canWrite() ? `<div class="toolbar"><button class="btn primary sm" data-act="new" data-entity="tasks" data-project="${esc(p.id)}" data-milestone="1">+ Add milestone</button></div>` : '';
-    if (!ms.length) return add + '<div class="empty-state"><b>No milestones yet</b>Milestones are tasks marked “This is a milestone”, such as mobilisation, handover or testing and commissioning.</div>';
-    const rows = ms.slice().sort((a, b) => (a.dueDate || '9').localeCompare(b.dueDate || '9')).map((t) => {
-      let variance = '<span class="muted">—</span>';
-      if (t.status === 'Done' && t.completedAt && t.dueDate) {
-        const late = Math.round((parseDay(t.completedAt.slice(0, 10)) - parseDay(t.dueDate)) / 864e5);
-        variance = late > 0 ? `<span class="chip warn">Done ${late}d late</span>` : '<span class="chip ok">On time</span>';
-      } else if (t.dueDate) variance = chip(taskDue(t));
-      return `<tr data-act="open" data-entity="tasks" data-id="${esc(t.id)}"><td class="title"><span class="ms">◆</span> ${esc(t.title)}</td>
-        <td class="nw">${fmtDate(t.dueDate)}</td><td class="nw">${t.completedAt ? fmtDate(t.completedAt) : '—'}</td>
-        <td class="nw">${esc(t.status)}</td><td class="nw">${variance}</td><td class="nw">${avatar(t.assignee)} ${esc(userName(t.assignee))}</td></tr>`;
-    }).join('');
-    return add + `<div class="tablewrap"><table class="t"><thead><tr><th>Milestone</th><th>Planned</th><th>Actual</th><th>Status</th><th>Variance</th><th>Owner</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-  }
-
-  // ------------------------------------------------------------ claims
-
-  function claimStatusChip(c) {
-    if (claimOverdue(c)) return '<span class="chip crit">Overdue</span>';
-    const cls = { Paid: 'ok', Certified: 'info', Invoiced: 'info', Submitted: 'warn', Draft: '' }[c.status] || '';
-    return `<span class="chip ${cls}">${esc(c.status)}</span>`;
-  }
-
-  function claimTable(claims, showProject, p) {
-    const add = canWrite() ? `<div class="toolbar"><button class="btn primary sm" data-act="new" data-entity="claims"${p ? ` data-project="${esc(p.id)}"` : ''}>+ New claim</button></div>` : '';
-    if (!claims.length) return add + '<div class="empty-state"><b>No claims yet</b>Record each progress claim or VO claim here, then update it as it is certified and paid.</div>';
-    const rows = claims.slice().sort((a, b) => (b.submittedDate || '9').localeCompare(a.submittedDate || '9')).map((c) => {
-      const due = claimDue(c);
-      return `<tr data-act="open" data-entity="claims" data-id="${esc(c.id)}">
-        <td class="mono nw">${esc(c.claimNo)}</td>${showProject ? `<td class="title">${esc(projectName(c.projectId))}</td>` : ''}<td>${esc(c.title)}</td>
-        <td class="nw">${fmtDate(c.submittedDate)}</td><td class="r">${money(c.claimedAmount)}</td><td class="r">${c.certifiedAmount ? money(c.certifiedAmount) : '—'}</td>
-        <td class="r">${c.paidAmount ? money(c.paidAmount) : '—'}</td><td class="nw">${due && c.status !== 'Paid' && c.status !== 'Draft' ? fmtDate(due) : '—'}</td><td class="nw">${claimStatusChip(c)}</td></tr>`;
-    }).join('');
-    const live = claims.filter((c) => c.status !== 'Draft');
-    return add + `<div class="tablewrap"><table class="t"><thead><tr><th>Claim</th>${showProject ? '<th>Project</th>' : ''}<th>Description</th><th>Submitted</th><th class="r">Claimed</th><th class="r">Certified</th><th class="r">Received</th><th>Payment due</th><th>Status</th></tr></thead>
-      <tbody>${rows}</tbody><tfoot><tr><td colspan="${showProject ? 4 : 3}">Total (excl. drafts)</td><td class="r">${money(sum(live, (c) => c.claimedAmount))}</td><td class="r">${money(sum(live, (c) => c.certifiedAmount))}</td><td class="r">${money(sum(live, (c) => c.paidAmount))}</td><td colspan="2" class="r">Outstanding ${money(sum(live, claimOutstanding))}</td></tr></tfoot></table></div>`;
-  }
-
-  function viewClaims() {
-    const all = S.data.claims;
-    const list = all.filter((c) => (S.f.claimProject === 'all' || c.projectId === S.f.claimProject) &&
-      (S.f.claimStatus === 'all' || (S.f.claimStatus === 'open' ? c.status !== 'Paid' : S.f.claimStatus === 'overdue' ? claimOverdue(c) : c.status === S.f.claimStatus)));
-    const live = all.filter((c) => c.status !== 'Draft');
-    const overdue = all.filter(claimOverdue);
-    const revised = sum(S.data.projects.filter((p) => p.status !== 'Completed'), (p) => (Number(p.contractValue) || 0) + (Number(p.voValue) || 0));
-    return `
-      <div class="head"><div><h1>Payments &amp; Claims</h1><div class="sub">Progress claims and VO claims across all projects. Payment due = submitted date + payment term.</div></div></div>
-      <div class="strip five">
-        ${kpi(moneyShort(revised), 'Live contract value', 'incl. approved VO')}
-        ${kpi(moneyShort(sum(live, (c) => c.claimedAmount)), 'Claimed', pct(sum(live, (c) => c.claimedAmount), revised) + '% of contract value')}
-        ${kpi(moneyShort(sum(live, (c) => c.certifiedAmount)), 'Certified', 'by client / consultant')}
-        ${kpi(moneyShort(sum(all, claimOutstanding)), 'Outstanding', 'not yet received')}
-        ${kpi(overdue.length, 'Overdue', moneyShort(sum(overdue, claimOutstanding)), overdue.length ? 'crit' : '')}
-      </div>
-      <div class="toolbar">
-        <select id="claimProject" data-filter="claimProject" aria-label="Project"><option value="all">All projects</option>${S.data.projects.map((p) => `<option value="${esc(p.id)}"${S.f.claimProject === p.id ? ' selected' : ''}>${esc(p.code + ' · ' + p.name)}</option>`).join('')}</select>
-        <select id="claimStatus" data-filter="claimStatus" aria-label="Status">
-          <option value="open"${S.f.claimStatus === 'open' ? ' selected' : ''}>Not yet paid</option><option value="overdue"${S.f.claimStatus === 'overdue' ? ' selected' : ''}>Overdue only</option><option value="all"${S.f.claimStatus === 'all' ? ' selected' : ''}>All statuses</option>
-          ${CLAIM_STATUS.map((s) => `<option${S.f.claimStatus === s ? ' selected' : ''}>${s}</option>`).join('')}</select>
-      </div>
-      ${claimTable(list, true, S.f.claimProject !== 'all' ? find('projects', S.f.claimProject) : null)}`;
-  }
-
-  // ------------------------------------------------------------ my tasks
-
-  function viewMyTasks() {
-    const mine = S.data.tasks.filter((t) => t.assignee === S.me.id);
-    const open = mine.filter((t) => t.status !== 'Done');
+  function viewMyWork() {
+    const mine = S.items.filter((it) => { const s = sectionOf(it); return s && !s.archived && involved(it); });
+    const open = mine.filter((it) => !isDone(sectionOf(it), it));
+    const dueN = (it) => { const s = sectionOf(it); const f = dueF(s); const v = f && val(it, f); return v ? daysFromToday(v.slice(0, 10)) : null; };
     const groups = [
-      { k: 'Late', cls: 'crit', f: (t) => t.dueDate && daysFromToday(t.dueDate) < 0 },
-      { k: 'Today', f: (t) => t.dueDate && daysFromToday(t.dueDate) === 0 },
-      { k: 'Next 7 days', f: (t) => t.dueDate && daysFromToday(t.dueDate) > 0 && daysFromToday(t.dueDate) <= 7 },
-      { k: 'Later', f: (t) => t.dueDate && daysFromToday(t.dueDate) > 7 },
-      { k: 'No due date', f: (t) => !t.dueDate },
+      { k: 'Late', cls: 'crit', f: (it) => dueN(it) !== null && dueN(it) < 0 },
+      { k: 'Today', f: (it) => dueN(it) === 0 },
+      { k: 'Next 7 days', f: (it) => dueN(it) > 0 && dueN(it) <= 7 },
+      { k: 'Later', f: (it) => dueN(it) > 7 },
+      { k: 'No due date', f: (it) => dueN(it) === null },
     ];
-    const myRfq = S.data.rfqs.filter((r) => r.assignee === S.me.id && PRE.includes(r.stage)).sort((a, b) => (a.closingDate || '9').localeCompare(b.closingDate || '9'));
-    const recentDone = mine.filter((t) => t.status === 'Done').sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || '')).slice(0, 5);
-    const li = (t) => `<div class="li"><button type="button" class="check${t.status === 'Done' ? ' done' : ''}" data-act="toggle-done" data-id="${esc(t.id)}" aria-label="${t.status === 'Done' ? 'Mark as not done' : 'Mark as done'}"${canWrite() ? '' : ' disabled'}></button>
-      <div class="tx" data-act="open" data-entity="tasks" data-id="${esc(t.id)}"><b>${t.isMilestone ? '<span class="ms">◆</span> ' : ''}${esc(t.title)}</b><small>${esc(projectName(t.projectId))} · ${esc(t.status)}</small></div>
-      <div class="rt">${t.priority === 'Urgent' || t.priority === 'High' ? `<span class="chip ${t.priority === 'Urgent' ? 'crit' : 'warn'}">${esc(t.priority)}</span>` : ''}${chip(taskDue(t))}</div></div>`;
+    const li = (it) => {
+      const s = sectionOf(it);
+      return `<div class="li" data-act="open" data-id="${esc(it.id)}">${secMark(s)}
+        <div class="tx"><b>${esc(it.title)}</b><small>${esc(s.name)} · ${esc(roleOn(it))}${stageOpt(s, it) ? ' · ' + esc(stageOpt(s, it).label) : ''}</small></div>
+        <div class="rt">${chip(ageInfo(s, it))}${chip(dueInfo(s, it))}</div></div>`;
+    };
     return `
-      <div class="head"><div><h1>My Tasks</h1><div class="sub">${open.length} open · ${open.filter(groups[0].f).length} late · ${myRfq.length} RFQs in preparation</div></div></div>
-      ${myRfq.length ? `<div class="group"><h2>My RFQs in preparation</h2><div class="list">${myRfq.map((r) => `<div class="li"><span></span>
-        <div class="tx" data-act="open" data-entity="rfqs" data-id="${esc(r.id)}"><b>${esc(r.title)}</b><small><span class="mono">${esc(r.rfqNo)}</span> · ${esc(r.client)} · ${esc(stageLabel(r.stage))}</small></div>
-        <div class="rt">${chip(rfqAging(r))}${chip(rfqClosing(r))}</div></div>`).join('')}</div></div>` : ''}
-      ${open.length ? groups.map((g) => { const ts = open.filter(g.f).sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || '')); return ts.length ? `<div class="group"><h2 class="${g.cls || ''}">${g.k} · ${ts.length}</h2><div class="list">${ts.map(li).join('')}</div></div>` : ''; }).join('')
-        : '<div class="empty-state"><b>No open tasks</b>Tasks assigned to you on any project show up here.</div>'}
-      ${recentDone.length ? `<div class="group"><h2>Recently done</h2><div class="list">${recentDone.map(li).join('')}</div></div>` : ''}`;
+      <div class="head"><div><h1>My Work</h1><div class="sub">Items where you are an editor, a collaborator or the named person · ${open.length} open</div></div></div>
+      ${open.length ? groups.map((g) => { const its = open.filter(g.f).sort(byDue); return its.length ? `<div class="group"><h2 class="${g.cls || ''}">${g.k} · ${its.length}</h2><div class="list">${its.map(li).join('')}</div></div>` : ''; }).join('')
+        : '<div class="empty-state"><b>Nothing open</b>Items you are assigned to in any section show up here.</div>'}`;
   }
 
-  // ------------------------------------------------------------ team & access
+  // ------------------------------------------------------------ super admin: sections
 
-  function viewUsers() {
-    if (!isAdmin()) return '<div class="empty-state"><b>Admins only</b>Ask an admin to change who has access.</div>';
-    const rows = S.data.users.slice().sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)).map((u) => `
-      <tr data-act="open" data-entity="users" data-id="${esc(u.id)}"><td class="nw">${avatar(u.id)} ${esc(u.name || '—')}</td><td>${esc(u.id)}</td>
-        <td class="nw">${esc((ROLES.find((r) => r[0] === u.role) || [u.role, u.role])[1])}</td>
-        <td>${u.active === false ? '<span class="chip">No access</span>' : '<span class="chip ok">Active</span>'}</td></tr>`).join('');
+  function viewSections() {
+    if (!S.me.isSuper) return '<div class="empty-state"><b>Super admin only</b></div>';
+    const live = liveSections();
+    const gone = S.sections.filter((s) => s.archived);
+    const row = (s, i) => `<tr>
+      <td class="nw">${s.archived ? '' : `<button class="ibtn" data-act="sec-move" data-id="${esc(s.id)}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button><button class="ibtn" data-act="sec-move" data-id="${esc(s.id)}" data-dir="1" ${i === live.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>`}</td>
+      <td class="title">${secMark(s)} <a href="#s/${esc(s.id)}">${esc(s.name)}</a></td>
+      <td class="r">${S.items.filter((it) => it.sectionId === s.id).length}</td><td class="r">${s.fields.length}</td>
+      <td class="nw">${stageF(s) ? esc(stageF(s).label) : '<span class="muted">Table only</span>'}</td>
+      <td class="r">${S.access.filter((a) => a.sectionId === s.id).length}</td>
+      <td class="nw r">${s.archived ? `<button class="btn sm" data-act="sec-restore" data-id="${esc(s.id)}">Restore</button>`
+        : `<a class="btn sm" href="#s/${esc(s.id)}/customize">Customize</a> <button class="btn sm danger${S._armSec === s.id ? ' armed' : ''}" data-act="sec-archive" data-id="${esc(s.id)}">${S._armSec === s.id ? 'Click again to remove' : 'Remove'}</button>`}</td></tr>`;
     return `
-      <div class="head"><div><h1>Team &amp; Access</h1><div class="sub">Only the Google accounts listed here can sign in. Adding someone also gives them view access to the Drive folder for attachments.</div></div>
-        <button class="btn primary" data-act="new" data-entity="users">+ Add person</button></div>
-      <div class="tablewrap"><table class="t"><thead><tr><th>Name</th><th>Google email</th><th>Access</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      <div class="head"><div><h1>Manage sections</h1><div class="sub">Add, rename, reorder or remove sections. Removing hides a section from everyone; its data stays in the Google Sheet and you can restore it.</div></div>
+        <button class="btn primary" data-act="sec-new">+ New section</button></div>
+      ${live.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Order</th><th>Section</th><th class="r">Items</th><th class="r">Columns</th><th>Board by</th><th class="r">Users</th><th></th></tr></thead><tbody>${live.map(row).join('')}</tbody></table></div>`
+        : `<div class="empty-state"><b>No sections yet</b><button class="btn primary" data-act="seed-sections" style="margin-top:10px">Create the standard sections</button></div>`}
+      ${gone.length ? `<div class="group"><h2>Removed</h2><div class="tablewrap"><table class="t"><tbody>${gone.map(row).join('')}</tbody></table></div></div>` : ''}`;
   }
 
-  // ------------------------------------------------------------ drawer: view / edit any record
+  // ------------------------------------------------------------ super admin: users & access
 
-  function defaultsFor(entity, opts) {
-    opts = opts || {};
-    switch (entity) {
-      case 'rfqs': return { stage: 'todo', category: 'Supply', outcome: 'Pending', assignee: S.me.id };
-      case 'projects': return { status: 'Active', health: 'On track', retentionPct: 5, progressPct: 0, voValue: 0, pm: S.me.id };
-      case 'tasks': return { status: 'To Do', priority: 'Medium', assignee: S.me.id, projectId: opts.project || '', isMilestone: !!opts.milestone };
-      case 'claims': {
-        const n = S.data.claims.filter((c) => c.projectId === opts.project).length + 1;
-        return { status: 'Draft', paymentTermDays: 30, projectId: opts.project || '', claimNo: opts.project ? 'PC-' + pad(n) : '', title: opts.project ? 'Progress claim ' + n : '' };
+  function viewTeam() {
+    if (!S.me.isSuper) return '<div class="empty-state"><b>Super admin only</b></div>';
+    const secs = liveSections();
+    const people = S.users.slice().sort((a, b) => (a.id === Core.SUPER_ADMIN ? -1 : b.id === Core.SUPER_ADMIN ? 1 : (a.name || a.id).localeCompare(b.name || b.id)));
+    const lvl = (sid, uid) => { const a = S.access.find((x) => x.sectionId === sid && x.userId === uid); return a ? a.level : 'none'; };
+    const matrix = people.map((u) => `<tr>
+      <td class="nw sticky"><button class="linkrow" data-act="user-edit" data-id="${esc(u.id)}">${avatar(u.id)} <span><b>${esc(u.name || u.id)}</b><small>${esc(u.id)}</small></span></button></td>
+      <td class="nw">${u.id === Core.SUPER_ADMIN ? '<span class="chip info">Super admin</span>' : u.active ? '<span class="chip ok">Active</span>' : '<span class="chip">Switched off</span>'}</td>
+      ${secs.map((s) => u.id === Core.SUPER_ADMIN ? '<td class="nw muted">Full access</td>'
+        : `<td><select class="lvl lvl-${lvl(s.id, u.id)}" data-access="${esc(s.id)}|${esc(u.id)}" aria-label="${esc((u.name || u.id) + ' — ' + s.name)}">${Core.LEVELS.map((l) => `<option value="${l}"${lvl(s.id, u.id) === l ? ' selected' : ''}>${l === 'none' ? '—' : LEVEL_LABEL[l]}</option>`).join('')}</select></td>`).join('')}
+    </tr>`).join('');
+    return `
+      <div class="head"><div><h1>Users &amp; access</h1><div class="sub">Only accounts listed here can sign in. Set each person’s access per section; their dashboard shows only the sections they can open.</div></div>
+        <button class="btn primary" data-act="user-new">+ Add user</button></div>
+      <div class="legend-box">${['viewer', 'contributor', 'editor', 'manager'].map((l) => `<span><b>${LEVEL_LABEL[l]}</b> ${LEVEL_HELP[l]}</span>`).join('')}
+        <span><b>—</b> no access to the section, but they still see items where they are named as an editor or collaborator</span></div>
+      ${secs.length ? '' : '<div class="banner"><span>Create a section first, then give people access to it.</span></div>'}
+      <div class="tablewrap"><table class="t matrix"><thead><tr><th class="sticky">User</th><th>Status</th>${secs.map((s) => `<th>${esc(s.name)}</th>`).join('')}</tr></thead><tbody>${matrix}</tbody></table></div>`;
+  }
+
+  // ------------------------------------------------------------ customize columns
+
+  function viewCustomize(id) {
+    const s = section(id);
+    if (!s) return '<div class="empty-state"><b>Section not found</b><a href="#sections">Back</a></div>';
+    if (!can.template(ctx(), s)) return `<div class="empty-state"><b>You cannot change this section’s columns</b>Only the super admin and the section’s managers can. <a href="#s/${esc(id)}">Back to ${esc(s.name)}</a></div>`;
+    if (!S.tpl || S.tpl.id !== id) S.tpl = { id, name: s.name, stageField: s.stageField || '', fields: JSON.parse(JSON.stringify(s.fields)), armed: null };
+    const t = S.tpl;
+    const selects = t.fields.filter((f) => f.type === 'select');
+    const otherSecs = liveSections().filter((x) => x.id !== id);
+    const fieldRow = (f, i) => {
+      const isTitle = f.key === 'title';
+      const isStage = f.key === t.stageField;
+      const flags = [];
+      if (!isTitle) flags.push(flag(i, 'required', 'Required', f.required));
+      if (!isTitle && !isStage) flags.push(flag(i, 'onCard', 'Show on card', f.onCard));
+      if (f.type === 'date' || f.type === 'datetime') flags.push(flag(i, 'due', 'Deadline (late alerts)', f.due));
+      if (f.type === 'currency' || f.type === 'number') flags.push(flag(i, 'total', 'Show totals', f.total));
+      return `<div class="tf${isStage ? ' stage' : ''}">
+        <div class="tf-row">
+          <span class="tf-n">${i + 1}</span>
+          <label class="fld grow"><span>Column name</span><input type="text" value="${esc(f.label)}" data-tf="${i}" data-prop="label" aria-label="Column name"></label>
+          <label class="fld"><span>Type</span><select data-tf="${i}" data-prop="type"${isTitle ? ' disabled' : ''}>${Core.FIELD_TYPES.map((ty) => `<option value="${ty}"${f.type === ty ? ' selected' : ''}>${TYPE_LABEL[ty]}</option>`).join('')}</select></label>
+          <div class="tf-act">
+            <button type="button" class="ibtn" data-act="tpl-move" data-i="${i}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
+            <button type="button" class="ibtn" data-act="tpl-move" data-i="${i}" data-dir="1" ${i === t.fields.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
+            ${isTitle ? '<span class="chip">Always shown</span>' : `<button type="button" class="btn sm danger${t.armed === f.key ? ' armed' : ''}" data-act="tpl-del" data-i="${i}">${t.armed === f.key ? 'Click again' : 'Remove'}</button>`}
+          </div>
+        </div>
+        ${flags.length ? `<div class="tf-flags">${flags.join('')}${isStage ? '<span class="chip info">Board columns</span>' : ''}</div>` : ''}
+        ${f.type === 'link' ? `<label class="fld" style="max-width:320px"><span>Links to section</span><select data-tf="${i}" data-prop="target"><option value="">Choose a section</option>${otherSecs.map((x) => `<option value="${esc(x.id)}"${f.target === x.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>` : ''}
+        ${f.type === 'select' ? `<div class="opts">
+          <div class="opts-h"><span>Options</span>${isStage ? '<span class="muted">Alert after = days an item may stay in this stage before it is flagged. Done = finished, no late alerts.</span>' : ''}</div>
+          ${(f.options || []).map((o, j) => `<div class="opt">
+            <span class="dot f-${o.color}"></span>
+            <input type="text" value="${esc(o.label)}" data-to="${i}.${j}" data-prop="label" aria-label="Option name">
+            <select data-to="${i}.${j}" data-prop="color" aria-label="Colour">${Core.COLORS.map((c) => `<option value="${c}"${o.color === c ? ' selected' : ''}>${COLOR_LABEL[c]}</option>`).join('')}</select>
+            ${isStage ? `<label class="mini">Alert after <input type="number" min="0" max="365" value="${o.alertDays || ''}" data-to="${i}.${j}" data-prop="alertDays" aria-label="Alert after days"> d</label>
+              <label class="mini"><input type="checkbox" ${o.done ? 'checked' : ''} data-to="${i}.${j}" data-prop="done"> Done</label>` : ''}
+            <button type="button" class="ibtn" data-act="opt-move" data-i="${i}" data-j="${j}" data-dir="-1" ${j === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
+            <button type="button" class="ibtn" data-act="opt-move" data-i="${i}" data-j="${j}" data-dir="1" ${j === f.options.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
+            <button type="button" class="ibtn" data-act="opt-del" data-i="${i}" data-j="${j}" aria-label="Remove option">×</button>
+          </div>`).join('')}
+          <button type="button" class="btn sm" data-act="opt-add" data-i="${i}">+ Add option</button>
+        </div>` : ''}
+      </div>`;
+    };
+    return `
+      <div class="head"><div><div class="crumb"><a href="#s/${esc(id)}">${esc(s.name)}</a> / Customize</div><h1>Customize columns</h1>
+        <div class="sub">Changes apply for everyone as soon as you save. Removing a column hides it; the values already entered stay in the Google Sheet.</div></div>
+        <div class="toolbar"><a class="btn" href="#s/${esc(id)}" data-act="tpl-cancel">Cancel</a><button class="btn primary" data-act="tpl-save" id="tplSave">Save columns</button></div></div>
+      <section class="panel">
+        <div class="form">
+          <label class="fld"><span>Section name</span><input type="text" value="${esc(t.name)}" data-tpl="name"></label>
+          <label class="fld"><span>Board columns come from</span><select data-tpl="stageField"><option value="">No board — table only</option>${selects.map((f) => `<option value="${esc(f.key)}"${t.stageField === f.key ? ' selected' : ''}>${esc(f.label)}</option>`).join('')}</select></label>
+        </div>
+      </section>
+      <div class="tfs">${t.fields.map(fieldRow).join('')}</div>
+      <div class="toolbar"><button type="button" class="btn" data-act="tpl-add">+ Add column</button><span class="grow"></span><button class="btn primary" data-act="tpl-save">Save columns</button></div>`;
+  }
+  function flag(i, prop, label, on) {
+    return `<label class="mini"><input type="checkbox" data-tf="${i}" data-prop="${prop}"${on ? ' checked' : ''}> ${label}</label>`;
+  }
+
+  function rerenderTpl() {
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+  }
+
+  async function saveTemplate() {
+    const t = S.tpl;
+    if (!t.name.trim()) { toast('Give the section a name.', true); return; }
+    for (const f of t.fields) {
+      if (!f.label.trim()) { toast('Every column needs a name.', true); return; }
+      if (f.type === 'select' && !(f.options || []).some((o) => o.label.trim())) { toast('“' + f.label + '” needs at least one option.', true); return; }
+      if (f.type === 'link' && !f.target) { toast('Choose which section “' + f.label + '” links to.', true); return; }
+    }
+    const fields = t.fields.map((f) => {
+      const o = Object.assign({}, f);
+      if (o.type === 'select') o.options = o.options.filter((x) => x.label.trim()).map((x) => Object.assign({}, x, { value: x.value || 'o' + uid() }));
+      else delete o.options;
+      if (o.type !== 'link') delete o.target;
+      return o;
+    });
+    document.querySelectorAll('[data-act="tpl-save"]').forEach((b) => { b.disabled = true; b.textContent = 'Saving…'; });
+    try {
+      const res = await API.call('section.update', { id: t.id, patch: { name: t.name.trim(), fields, stageField: t.stageField } });
+      replaceSection(res.section);
+      S.tpl = null;
+      toast('Columns saved');
+      location.hash = '#s/' + t.id;
+    } catch (e) {
+      document.querySelectorAll('[data-act="tpl-save"]').forEach((b) => { b.disabled = false; b.textContent = 'Save columns'; });
+      handleError(e);
+    }
+  }
+
+  function replaceSection(sec) {
+    const i = S.sections.findIndex((s) => s.id === sec.id);
+    if (i >= 0) S.sections[i] = sec; else S.sections.push(sec);
+    S.sections.sort((a, b) => (a.order || 0) - (b.order || 0));
+  }
+
+  // ------------------------------------------------------------ drawer: item
+
+  function inputFor(s, f, v, ro) {
+    const id = 'f_' + f.key;
+    const dis = ro ? ' disabled' : '';
+    const req = f.required ? ' required' : '';
+    switch (f.type) {
+      case 'longtext': return `<textarea id="${id}" name="${f.key}"${dis}>${esc(v)}</textarea>`;
+      case 'number': case 'percent': return `<input type="number" id="${id}" name="${f.key}" step="any" value="${blank(v) ? '' : esc(v)}"${dis}${req}>`;
+      case 'currency': return `<input type="number" id="${id}" name="${f.key}" step="0.01" inputmode="decimal" value="${blank(v) ? '' : esc(v)}"${dis}${req}>`;
+      case 'date': return `<input type="date" id="${id}" name="${f.key}" value="${esc(String(v || '').slice(0, 10))}"${dis}${req}>`;
+      case 'datetime': return `<input type="datetime-local" id="${id}" name="${f.key}" value="${esc(String(v || '').slice(0, 16))}"${dis}${req}>`;
+      case 'select': return `<select id="${id}" name="${f.key}"${dis}${req}><option value="">—</option>${(f.options || []).map((o) => `<option value="${esc(o.value)}"${o.value === v ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`;
+      case 'person': return `<select id="${id}" name="${f.key}"${dis}${req}><option value="">Nobody</option>${S.users.filter((u) => u.active || u.id === v).map((u) => `<option value="${esc(u.id)}"${u.id === v ? ' selected' : ''}>${esc(u.name || u.id)}</option>`).join('')}</select>`;
+      case 'checkbox': return `<input type="checkbox" id="${id}" name="${f.key}"${v ? ' checked' : ''}${dis}>`;
+      case 'link': {
+        const targets = S.items.filter((x) => x.sectionId === f.target);
+        return `<select id="${id}" name="${f.key}"${dis}${req}><option value="">—</option>${targets.map((x) => `<option value="${esc(x.id)}"${x.id === v ? ' selected' : ''}>${esc(x.title)}</option>`).join('')}${v && !item(v) ? `<option value="${esc(v)}" selected>(an item you cannot see)</option>` : ''}</select>`;
       }
-      case 'users': return { role: 'editor', active: true };
-      default: return {};
+      case 'url': return `<input type="url" id="${id}" name="${f.key}" value="${esc(v)}" placeholder="https://"${dis}${req}>`;
+      default: return `<input type="text" id="${id}" name="${f.key}" value="${esc(v)}"${dis}${req}>`;
     }
   }
 
-  function recTitle(entity, r) {
-    if (!r || !r.id) return 'New ' + LABEL[entity].toLowerCase();
-    return { rfqs: r.rfqNo, projects: r.name, tasks: r.title, claims: r.claimNo + ' · ' + projectName(r.projectId), users: r.name || r.id }[entity] || '';
+  function picker(name, label, chosen, ro, hint) {
+    const people = S.users.filter((u) => u.active || chosen.includes(u.id));
+    return `<div class="fld wide"><span>${label}</span>
+      <details class="pick"${ro ? ' data-ro="1"' : ''}>
+        <summary>${chosen.length ? chosen.map((id) => `<span class="pchip">${avatar(id)}${esc(userName(id))}</span>`).join('') : `<span class="muted">${ro ? 'Nobody' : 'Choose people'}</span>`}</summary>
+        ${ro ? '' : `<div class="pick-b"><input type="search" placeholder="Find a person" data-pick-filter aria-label="Find a person">
+          ${people.map((u) => `<label class="prow"><input type="checkbox" name="${name}" value="${esc(u.id)}"${chosen.includes(u.id) ? ' checked' : ''}> ${avatar(u.id)} <span>${esc(u.name || u.id)}</span><small>${esc(u.id)}</small></label>`).join('')}</div>`}
+      </details>${hint ? `<small class="muted">${hint}</small>` : ''}</div>`;
   }
 
-  function fieldHtml(f, v, ro, isNew) {
-    const id = 'f_' + f.k;
-    const dis = ro || (f.lockOnEdit && !isNew) ? ' disabled' : '';
-    const req = f.req ? ' required' : '';
-    let input = '';
-    switch (f.t) {
-      case 'select':
-        input = `<select id="${id}" name="${f.k}"${dis}>${f.opts.map((o) => { const [val, lab] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(val)}"${String(v) === String(val) ? ' selected' : ''}>${esc(lab)}</option>`; }).join('')}</select>`;
-        break;
-      case 'user': {
-        const us = S.data.users.filter((u) => u.active !== false || u.id === v);
-        input = `<select id="${id}" name="${f.k}"${dis}><option value="">Unassigned</option>${us.map((u) => `<option value="${esc(u.id)}"${u.id === v ? ' selected' : ''}>${esc(u.name || u.id)}</option>`).join('')}</select>`;
-        break;
-      }
-      case 'project':
-        input = `<select id="${id}" name="${f.k}"${dis}${req}><option value="">Choose a project</option>${S.data.projects.map((p) => `<option value="${esc(p.id)}"${p.id === v ? ' selected' : ''}>${esc(p.code + ' · ' + p.name)}</option>`).join('')}</select>`;
-        break;
-      case 'textarea':
-        input = `<textarea id="${id}" name="${f.k}"${dis}>${esc(v)}</textarea>`;
-        break;
-      case 'checkbox':
-        return `<label class="fld chk"><input type="checkbox" id="${id}" name="${f.k}"${v ? ' checked' : ''}${dis}><span>${esc(f.l)}</span></label>`;
-      case 'money':
-        input = `<input type="number" id="${id}" name="${f.k}" step="0.01" min="0" inputmode="decimal" value="${v === 0 || v ? esc(v) : ''}"${dis}>`;
-        break;
-      case 'number':
-        input = `<input type="number" id="${id}" name="${f.k}" step="1" min="${f.min}" max="${f.max}" value="${v === 0 || v ? esc(v) : ''}"${dis}>`;
-        break;
-      case 'date':
-        input = `<input type="date" id="${id}" name="${f.k}" value="${esc((v || '').slice(0, 10))}"${dis}>`;
-        break;
-      case 'datetime':
-        input = `<input type="datetime-local" id="${id}" name="${f.k}" value="${esc((v || '').slice(0, 16))}"${dis}>`;
-        break;
-      case 'email':
-        input = `<input type="email" id="${id}" name="${f.k}" value="${esc(v)}" autocomplete="off"${dis}${req}>`;
-        break;
-      default:
-        input = `<input type="text" id="${id}" name="${f.k}" value="${esc(v)}"${f.list ? ` list="dl_${f.list}"` : ''}${dis}${req}>`;
-    }
-    return `<label class="fld${f.wide ? ' wide' : ''}"><span>${esc(f.l)}${f.req ? ' *' : ''}</span>${input}</label>`;
+  function openItem(id) {
+    const it = item(id);
+    if (!it) { toast('This item no longer exists, or you no longer have access.', true); return; }
+    S.drawer = { kind: 'item', id: it.id, sectionId: it.sectionId, armed: false, busy: false };
+    renderItemDrawer(it);
+  }
+  function newItem(sectionId, preset) {
+    const s = section(sectionId);
+    const data = Object.assign({}, preset || {});
+    const sf = stageF(s);
+    if (sf && !data[sf.key] && sf.options[0]) data[sf.key] = sf.options[0].value;
+    S.drawer = { kind: 'item', id: null, sectionId, armed: false, busy: false };
+    renderItemDrawer({ title: '', data, editors: [], collaborators: [], files: [] });
   }
 
-  function openRecord(entity, id, opts) {
-    const rec = id ? find(entity, id) : null;
-    if (id && !rec) { toast('This item no longer exists.', true); return; }
-    S.drawer = { entity, id: rec ? rec.id : null, armed: false, busy: false };
-    renderDrawer(rec ? Object.assign({}, rec) : defaultsFor(entity, opts));
-  }
-
-  function renderDrawer(rec) {
-    const { entity, id } = S.drawer;
-    const isNew = !id;
-    const ro = !isNew && !canEditRec(entity, rec);
-    const clients = [...new Set(S.data.rfqs.concat(S.data.projects).map((r) => r.client).filter(Boolean))].sort();
-    const thread = isNew || entity === 'users' ? [] : S.data.comments.filter((c) => c.entity === entity && c.entityId === id).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
-    let extra = '';
-    if (!isNew && entity === 'projects') extra = `<a class="btn sm" href="#project/${esc(id)}" data-act="close-drawer">Open project page</a>`;
-    if (!isNew && entity === 'rfqs' && rec.outcome === 'Awarded' && canWrite() && !S.data.projects.some((p) => p.notes && p.notes.includes(rec.rfqNo))) {
-      extra = `<button type="button" class="btn sm" data-act="rfq-to-project">Create project from this award</button>`;
-    }
+  function renderItemDrawer(it) {
+    const s = section(S.drawer.sectionId);
+    const isNew = !S.drawer.id;
+    const editable = isNew ? can.create(ctx(), s) : can.editItem(ctx(), it, s);
+    const ro = !editable;
+    const commentable = !isNew && can.comment(ctx(), it, s);
+    const thread = isNew ? [] : S.comments.filter((c) => c.itemId === it.id).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+    const related = isNew ? [] : liveSections().flatMap((s2) => s2.fields.filter((f) => f.type === 'link' && f.target === s.id).map((f) => ({ s2, f, items: S.items.filter((x) => x.sectionId === s2.id && val(x, f) === it.id) })));
+    const fields = s.fields;
     drawerEl.innerHTML = `
       <div class="scrim" data-act="close-drawer"></div>
       <div class="pane" role="dialog" aria-modal="true" aria-labelledby="paneTitle">
-        <div class="pane-h"><div style="min-width:0"><div class="k">${esc(LABEL[entity])}</div><h2 id="paneTitle">${esc(recTitle(entity, rec))}</h2>
-          ${!isNew && rec.updatedAt ? `<div class="muted" style="font-size:12px">Updated ${ago(rec.updatedAt)}</div>` : ''}</div>
+        <div class="pane-h"><div style="min-width:0"><div class="k">${esc(s.name)}</div><h2 id="paneTitle">${isNew ? 'New item' : esc(it.title)}</h2>
+          ${!isNew ? `<div class="muted" style="font-size:12px">Updated ${ago(it.updatedAt)}${roleOn(it) ? ' · you are ' + esc(roleOn(it).toLowerCase()) : ''}</div>` : ''}</div>
           <button type="button" class="x" data-act="close-drawer" aria-label="Close">×</button></div>
         <div class="pane-b">
-          <form class="form" id="recForm" novalidate>
-            ${FIELDS[entity].map((f) => fieldHtml(f, rec[f.k], ro, isNew)).join('')}
-            <datalist id="dl_clients">${clients.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
+          <form class="form" id="itemForm" novalidate>
+            ${fields.map((f) => `<label class="fld${f.type === 'longtext' || f.key === 'title' ? ' wide' : ''}${f.type === 'checkbox' ? ' chk' : ''}">${f.type === 'checkbox' ? inputFor(s, f, val(it, f), ro) + `<span>${esc(f.label)}</span>` : `<span>${esc(f.label)}${f.required ? ' *' : ''}</span>${inputFor(s, f, val(it, f), ro)}`}</label>`).join('')}
+            ${picker('editors', 'Editors', it.editors || [], ro, 'Editors can change this item, even without access to the whole section.')}
+            ${picker('collaborators', 'Collaborators', it.collaborators || [], ro, 'Collaborators can see this item and comment on it.')}
             <div class="form-actions">
-              ${ro ? '<span class="muted">You have view-only access.</span>' : `<button type="submit" class="btn primary" id="saveBtn">${isNew ? 'Add ' + LABEL[entity].toLowerCase() : 'Save changes'}</button><button type="button" class="btn" data-act="close-drawer">Cancel</button>`}
-              ${extra}
+              ${ro ? '<span class="muted">You can view this item but not change it.</span>' : `<button type="submit" class="btn primary" id="saveBtn">${isNew ? 'Add item' : 'Save changes'}</button><button type="button" class="btn" data-act="close-drawer">Cancel</button>`}
               <span class="sp"></span>
-              ${!isNew && canDelete(entity, rec) ? `<button type="button" class="btn danger${S.drawer.armed ? ' armed' : ''}" data-act="delete">${S.drawer.armed ? 'Click again to delete' : 'Delete'}</button>` : ''}
+              ${!isNew && can.deleteItem(ctx(), it, s) ? `<button type="button" class="btn danger${S.drawer.armed ? ' armed' : ''}" data-act="item-delete">${S.drawer.armed ? 'Click again to delete' : 'Delete'}</button>` : ''}
             </div>
           </form>
-          ${!isNew && FILE_ENTITIES.includes(entity) ? `
-            <section class="sec"><h3>Attachments <span>${canWrite() ? `<button type="button" class="btn sm" data-act="upload"${S.drawer.busy ? ' disabled' : ''}>${S.drawer.busy ? 'Uploading…' : 'Attach file'}</button>` : ''}</span></h3>
+          ${related.map((r) => `<section class="sec"><h3>${esc(r.s2.name)} <span class="muted" style="text-transform:none;letter-spacing:0">${r.items.length}${r.s2.fields.filter((f) => f.total).map((f) => ' · ' + esc(f.label) + ' ' + moneyShortOrNum(f, sum(r.items, (x) => val(x, f)))).join('')}</span>
+              ${can.create(ctx(), r.s2) ? `<button type="button" class="btn sm" data-act="new-linked" data-section="${esc(r.s2.id)}" data-field="${esc(r.f.key)}" data-target="${esc(it.id)}">+ Add</button>` : ''}</h3>
+            ${r.items.length ? `<ul class="rel">${r.items.sort(byDue).map((x) => `<li data-act="open" data-id="${esc(x.id)}"><span>${esc(x.title)}</span>${stageOpt(r.s2, x) ? `<span class="chip c-${stageOpt(r.s2, x).color}">${esc(stageOpt(r.s2, x).label)}</span>` : ''}${chip(dueInfo(r.s2, x))}</li>`).join('')}</ul>` : '<div class="muted">None you can see.</div>'}
+          </section>`).join('')}
+          ${!isNew ? `
+            <section class="sec"><h3>Attachments ${editable ? `<button type="button" class="btn sm" data-act="upload"${S.drawer.busy ? ' disabled' : ''}>${S.drawer.busy ? 'Uploading…' : 'Attach file'}</button>` : ''}</h3>
               <input type="file" id="fileInput" hidden>
-              ${rec.files && rec.files.length ? `<ul class="files">${rec.files.map((fl) => `<li>📄 <a href="${esc(fl.url)}" target="_blank" rel="noopener">${esc(fl.name)}</a><small>${fl.size ? Math.max(1, Math.round(fl.size / 1024)) + ' KB · ' : ''}${esc(userName(fl.uploadedBy))} · ${ago(fl.uploadedAt)}</small></li>`).join('')}</ul>`
-                : `<div class="muted">No files yet. ${API.mode === 'demo' ? 'Attachments are saved to Google Drive once it is connected.' : 'Attach quotations, drawings or certificates; they are saved to Google Drive.'}</div>`}
-            </section>` : ''}
-          ${!isNew && entity !== 'users' ? `
+              ${(it.files || []).length ? `<ul class="files">${it.files.map((fl) => `<li>📄 <button type="button" class="linkbtn" data-act="file-open" data-file="${esc(fl.id)}">${esc(fl.name)}</button><small>${fl.size ? Math.max(1, Math.round(fl.size / 1024)) + ' KB · ' : ''}${esc(userName(fl.uploadedBy))} · ${ago(fl.uploadedAt)}</small></li>`).join('')}</ul>`
+                : `<div class="muted">No files yet.${API.mode === 'demo' ? ' Attachments are stored in Google Drive once it is connected.' : ''}</div>`}
+            </section>
             <section class="sec"><h3>Comments &amp; activity</h3>
               <div class="thread">${thread.length ? thread.map((c) => c.kind === 'log'
                 ? `<div class="msg log"><span class="dot"></span><div>${esc(userName(c.author))} ${esc(c.text)} · ${ago(c.createdAt)}</div></div>`
                 : `<div class="msg">${avatar(c.author)}<div class="bd"><div class="hd"><b>${esc(userName(c.author))}</b> · ${ago(c.createdAt)}</div><div class="tx">${esc(c.text)}</div></div></div>`).join('')
                 : '<div class="muted">No comments yet.</div>'}</div>
-              ${canWrite() ? `<div class="composer"><textarea id="commentText" placeholder="Write an update or ask a question…" aria-label="Comment"></textarea><button type="button" class="btn sm" data-act="add-comment">Post comment</button></div>` : ''}
+              ${commentable ? '<div class="composer"><textarea id="commentText" placeholder="Write an update or ask a question…" aria-label="Comment"></textarea><button type="button" class="btn sm" data-act="add-comment">Post comment</button></div>' : ''}
             </section>` : ''}
         </div>
       </div>`;
-    drawerEl.hidden = false;
-    document.body.style.overflow = 'hidden';
-    const first = drawerEl.querySelector(isNew ? '#recForm input:not([disabled]), #recForm select:not([disabled])' : '.x');
-    if (first) first.focus();
+    openDrawer(isNew ? '#itemForm input:not([disabled])' : '.x');
   }
 
+  function openDrawer(focusSel) {
+    drawerEl.hidden = false;
+    document.body.style.overflow = 'hidden';
+    const first = drawerEl.querySelector(focusSel);
+    if (first) first.focus();
+  }
   function closeDrawer() {
     S.drawer = null;
     drawerEl.hidden = true;
@@ -920,81 +825,59 @@
     document.body.style.overflow = '';
   }
 
-  function readForm(form, entity, isNew) {
-    const vals = {};
-    for (const f of FIELDS[entity]) {
-      if (f.lockOnEdit && !isNew) continue;
-      const el = form.elements[f.k];
+  function mergeItem(res) {
+    const it = res.item;
+    const i = S.items.findIndex((x) => x.id === it.id);
+    if (i >= 0) S.items[i] = it; else S.items.push(it);
+    if (res.log) S.comments.push(res.log);
+    return it;
+  }
+
+  async function saveItem(form) {
+    const s = section(S.drawer.sectionId);
+    const isNew = !S.drawer.id;
+    const data = {};
+    let title = '';
+    for (const f of s.fields) {
+      const el = form.elements[f.key];
       if (!el) continue;
-      let v = f.t === 'checkbox' ? el.checked : el.value.trim();
-      if (f.t === 'money' || f.t === 'number') v = v === '' ? 0 : Number(v);
-      if (f.req && (v === '' || v === null)) throw new Error(f.l + ' is required.');
-      vals[f.k] = v;
+      let v = f.type === 'checkbox' ? el.checked : el.value.trim();
+      if (['number', 'currency', 'percent'].includes(f.type)) v = v === '' ? '' : Number(v);
+      if (f.required && (v === '' || v === false)) { toast(f.label + ' is required.', true); el.focus(); return; }
+      if (f.key === 'title') title = v; else data[f.key] = v;
     }
-    if (entity === 'users' && isNew) {
-      vals.id = vals.id.toLowerCase();
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(vals.id)) throw new Error('Enter a valid Google email.');
-    }
-    if (vals.progressPct !== undefined) vals.progressPct = Math.min(100, Math.max(0, vals.progressPct));
-    if (vals.retentionPct !== undefined) vals.retentionPct = Math.min(100, Math.max(0, vals.retentionPct));
-    return vals;
-  }
-
-  function logChange(entity, id, text) {
-    API.create('comments', { entity, entityId: id, kind: 'log', text })
-      .then((c) => { S.data.comments.push(c); })
-      .catch(() => { /* activity log is best-effort */ });
-  }
-
-  async function saveForm(form) {
-    const { entity, id } = S.drawer;
-    const isNew = !id;
-    let vals;
-    try { vals = readForm(form, entity, isNew); } catch (e) { toast(e.message, true); return; }
+    const pick = (n) => [...form.querySelectorAll(`input[name="${n}"]:checked`)].map((x) => x.value);
+    const editors = pick('editors');
+    const collaborators = pick('collaborators').filter((x) => !editors.includes(x));
     const btn = $('#saveBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
     try {
       if (isNew) {
-        if (entity === 'rfqs') vals.stageChangedAt = nowIso();
-        if (entity === 'tasks') vals.completedAt = vals.status === 'Done' ? nowIso() : '';
-        const created = await API.create(entity, vals);
-        if (FILE_ENTITIES.includes(entity) && !Array.isArray(created.files)) created.files = [];
-        S.data[entity].push(created);
-        toast(LABEL[entity] + ' added');
-        if (entity === 'projects') { closeDrawer(); location.hash = '#project/' + created.id; render(); return; }
+        const res = await API.call('item.create', { sectionId: s.id, title, data, editors, collaborators });
+        mergeItem(res);
+        toast('Item added');
       } else {
-        const prev = find(entity, id);
-        if (entity === 'rfqs' && prev.stage !== vals.stage) vals.stageChangedAt = nowIso();
-        if (entity === 'tasks' && prev.status !== vals.status) vals.completedAt = vals.status === 'Done' ? nowIso() : '';
-        const updated = await API.update(entity, id, vals);
-        if (FILE_ENTITIES.includes(entity) && !Array.isArray(updated.files)) updated.files = prev.files || [];
-        replace(entity, updated);
-        if (entity === 'rfqs' && prev.stage !== vals.stage) logChange(entity, id, 'moved this to ' + stageLabel(vals.stage));
-        if (entity === 'tasks' && prev.status !== vals.status) logChange(entity, id, 'changed status to ' + vals.status);
-        if (entity === 'claims' && prev.status !== vals.status) logChange(entity, id, 'changed status to ' + vals.status);
+        const res = await API.call('item.update', { id: S.drawer.id, patch: { title, data, editors, collaborators } });
+        mergeItem(res);
         toast('Saved');
       }
       closeDrawer();
       render();
     } catch (e) {
-      if (btn) { btn.disabled = false; btn.textContent = isNew ? 'Add ' + LABEL[entity].toLowerCase() : 'Save changes'; }
+      if (btn) { btn.disabled = false; btn.textContent = isNew ? 'Add item' : 'Save changes'; }
       handleError(e);
     }
   }
 
-  async function deleteRecord() {
-    const { entity, id } = S.drawer;
-    if (!S.drawer.armed) {
-      S.drawer.armed = true;
-      renderDrawer(find(entity, id));
-      return;
-    }
+  async function deleteItem() {
+    if (!S.drawer.armed) { S.drawer.armed = true; renderItemDrawer(item(S.drawer.id)); return; }
+    const id = S.drawer.id;
     try {
-      await API.remove(entity, id);
-      S.data[entity] = S.data[entity].filter((r) => r.id !== id);
+      await API.call('item.remove', { id });
+      S.items = S.items.filter((x) => x.id !== id);
+      S.comments = S.comments.filter((c) => c.itemId !== id);
       closeDrawer();
-      toast(LABEL[entity] + ' deleted');
-      if (entity === 'projects') location.hash = '#projects';
+      toast('Item deleted');
       render();
     } catch (e) { handleError(e); }
   }
@@ -1003,61 +886,219 @@
     const ta = $('#commentText');
     const text = ta && ta.value.trim();
     if (!text) return;
-    const { entity, id } = S.drawer;
     ta.disabled = true;
     try {
-      const c = await API.create('comments', { entity, entityId: id, kind: 'comment', text });
-      S.data.comments.push(c);
-      renderDrawer(find(entity, id));
+      const res = await API.call('comment.create', { itemId: S.drawer.id, text });
+      S.comments.push(res.comment);
+      renderItemDrawer(item(S.drawer.id));
       render();
     } catch (e) { ta.disabled = false; handleError(e); }
   }
 
   async function uploadFile(file) {
-    const { entity, id } = S.drawer;
+    const id = S.drawer.id;
     if (file.size > 20 * 1024 * 1024) { toast('Files must be 20 MB or smaller.', true); return; }
     S.drawer.busy = true;
-    renderDrawer(find(entity, id));
+    renderItemDrawer(item(id));
     try {
-      const updated = await API.upload(entity, id, file);
-      replace(entity, updated);
+      mergeItem(await API.upload(id, file));
       toast('File attached');
     } catch (e) { handleError(e); }
-    if (S.drawer && S.drawer.id === id) { S.drawer.busy = false; renderDrawer(find(entity, id)); }
+    if (S.drawer && S.drawer.id === id) { S.drawer.busy = false; renderItemDrawer(item(id)); }
     render();
   }
 
-  async function rfqToProject() {
-    const r = find('rfqs', S.drawer.id);
-    closeDrawer();
-    S.drawer = { entity: 'projects', id: null, armed: false, busy: false };
-    renderDrawer(Object.assign(defaultsFor('projects'), {
-      name: r.title, client: r.client, contractValue: r.estValue || 0, pm: r.assignee || S.me.id,
-      code: '', notes: 'Awarded from ' + r.rfqNo,
-    }));
+  async function openFile(fileId) {
+    try {
+      toast('Opening file…');
+      const f = await API.call('item.file', { id: S.drawer.id, fileId });
+      const bytes = Uint8Array.from(atob(f.base64), (c) => c.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: f.mimeType || 'application/octet-stream' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = f.name || 'file';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (e) { handleError(e); }
   }
 
-  // Moving a card on a board, or ticking a task
-  async function moveRecord(entity, id, field, value) {
-    const rec = find(entity, id);
-    if (!rec || rec[field] === value) return;
-    const before = Object.assign({}, rec);
-    const patch = { [field]: value };
-    if (entity === 'rfqs') patch.stageChangedAt = nowIso();
-    if (entity === 'tasks') patch.completedAt = value === 'Done' ? nowIso() : '';
-    Object.assign(rec, patch);
+  async function moveItem(id, stage) {
+    const it = item(id);
+    const s = it && sectionOf(it);
+    if (!it || !s || !s.stageField || (it.data || {})[s.stageField] === stage) return;
+    const before = JSON.parse(JSON.stringify(it));
+    it.data = Object.assign({}, it.data, { [s.stageField]: stage });
     render();
     try {
-      const updated = await API.update(entity, id, patch);
-      if (!Array.isArray(updated.files)) updated.files = before.files || [];
-      replace(entity, updated);
-      logChange(entity, id, entity === 'rfqs' ? 'moved this to ' + stageLabel(value) : 'changed status to ' + value);
-      toast(entity === 'rfqs' ? 'Moved to ' + stageLabel(value) : 'Marked ' + value);
+      mergeItem(await API.call('item.update', { id, patch: { data: { [s.stageField]: stage } } }));
+      const o = optOf(stageF(s), stage);
+      toast('Moved to ' + (o ? o.label : 'no stage'));
+      render();
     } catch (e) {
-      replace(entity, before);
+      mergeItem({ item: before });
       render();
       handleError(e);
     }
+  }
+
+  // ------------------------------------------------------------ drawer: user, new section
+
+  function openUser(id, armed) {
+    const u = id ? user(id) : { id: '', name: '', active: true };
+    const isSuperRow = u.id === Core.SUPER_ADMIN;
+    S.drawer = { kind: 'user', id: id || null, armed: !!armed };
+    const secs = liveSections();
+    const lvl = (sid) => { const a = S.access.find((x) => x.sectionId === sid && x.userId === u.id); return a ? a.level : 'none'; };
+    drawerEl.innerHTML = `
+      <div class="scrim" data-act="close-drawer"></div>
+      <div class="pane" role="dialog" aria-modal="true" aria-labelledby="paneTitle">
+        <div class="pane-h"><div><div class="k">User</div><h2 id="paneTitle">${id ? esc(u.name || u.id) : 'Add user'}</h2></div><button type="button" class="x" data-act="close-drawer" aria-label="Close">×</button></div>
+        <div class="pane-b">
+          <form class="form" id="userForm" novalidate>
+            <label class="fld wide"><span>Google email *</span><input type="email" name="id" value="${esc(u.id)}" autocomplete="off"${id ? ' disabled' : ' required'}></label>
+            <label class="fld wide"><span>Name</span><input type="text" name="name" value="${esc(u.name)}" placeholder="Filled in from Google at first sign-in if left empty"></label>
+            <label class="fld chk wide"><input type="checkbox" name="active"${u.active !== false ? ' checked' : ''}${isSuperRow ? ' disabled' : ''}><span>Can sign in</span></label>
+            ${!isSuperRow && secs.length ? `<div class="fld wide"><span>Section access</span><div class="acc-list">${secs.map((s) => `<label class="acc">${secMark(s)}<span>${esc(s.name)}</span><select name="acc_${esc(s.id)}">${Core.LEVELS.map((l) => `<option value="${l}"${lvl(s.id) === l ? ' selected' : ''}>${l === 'none' ? 'No access' : LEVEL_LABEL[l]}</option>`).join('')}</select></label>`).join('')}</div></div>` : ''}
+            ${isSuperRow ? '<div class="banner wide"><span>The super admin always has full access and cannot be switched off.</span></div>' : ''}
+            <div class="form-actions">
+              <button type="submit" class="btn primary" id="saveBtn">${id ? 'Save changes' : 'Add user'}</button><button type="button" class="btn" data-act="close-drawer">Cancel</button>
+              <span class="sp"></span>
+              ${id && !isSuperRow ? `<button type="button" class="btn danger${S.drawer.armed ? ' armed' : ''}" data-act="user-delete">${S.drawer.armed ? 'Click again to delete' : 'Delete user'}</button>` : ''}
+            </div>
+          </form>
+        </div>
+      </div>`;
+    openDrawer(id ? 'input[name=name]' : 'input[name=id]');
+  }
+
+  async function saveUser(form) {
+    const id = S.drawer.id;
+    const email = id || form.elements.id.value.trim().toLowerCase();
+    const name = form.elements.name.value.trim();
+    const active = form.elements.active.checked;
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { toast('Enter a valid Google email.', true); return; }
+    const btn = $('#saveBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      const res = id ? await API.call('user.update', { id, patch: { name, active: email === Core.SUPER_ADMIN ? true : active } })
+        : await API.call('user.create', { id: email, name, active });
+      const i = S.users.findIndex((u) => u.id === res.user.id);
+      if (i >= 0) S.users[i] = res.user; else S.users.push(res.user);
+      for (const s of liveSections()) {
+        const sel = form.elements['acc_' + s.id];
+        if (!sel) continue;
+        const cur = (S.access.find((a) => a.sectionId === s.id && a.userId === email) || {}).level || 'none';
+        if (sel.value !== cur) await setAccess(s.id, email, sel.value, true);
+      }
+      closeDrawer();
+      toast(id ? 'User saved' : 'User added');
+      render();
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = id ? 'Save changes' : 'Add user';
+      handleError(e);
+    }
+  }
+
+  async function setAccess(sectionId, userId, level, quiet) {
+    const res = await API.call('access.set', { sectionId, userId, level });
+    S.access = S.access.filter((a) => !(a.sectionId === sectionId && a.userId === userId));
+    if (res.access) S.access.push(res.access);
+    if (!quiet) toast(userName(userId) + ': ' + LEVEL_LABEL[level] + ' on ' + section(sectionId).name);
+  }
+
+  function openNewSection() {
+    S.drawer = { kind: 'section' };
+    drawerEl.innerHTML = `
+      <div class="scrim" data-act="close-drawer"></div>
+      <div class="pane" role="dialog" aria-modal="true" aria-labelledby="paneTitle">
+        <div class="pane-h"><div><div class="k">Manage sections</div><h2 id="paneTitle">New section</h2></div><button type="button" class="x" data-act="close-drawer" aria-label="Close">×</button></div>
+        <div class="pane-b">
+          <form class="form" id="sectionForm" novalidate>
+            <label class="fld wide"><span>Section name</span><input type="text" name="name" placeholder="e.g. Procurement" required></label>
+            <div class="fld wide"><span>Start from</span><div class="tpl-list">
+              <label class="tpl"><input type="radio" name="tpl" value="" checked><span><b>Blank</b><small>A title and a To Do / In Progress / Done status. Add your own columns next.</small></span></label>
+              ${window.TEMPLATES.map((t) => `<label class="tpl"><input type="radio" name="tpl" value="${t.id}"><span><b>${esc(t.name)}</b><small>${esc(t.blurb)} ${t.fields.length} columns.</small></span></label>`).join('')}
+            </div></div>
+            <div class="form-actions"><button type="submit" class="btn primary" id="saveBtn">Create section</button><button type="button" class="btn" data-act="close-drawer">Cancel</button></div>
+          </form>
+        </div>
+      </div>`;
+    openDrawer('input[name=name]');
+  }
+
+  function blankSection(name) {
+    return {
+      name, template: '', stageField: 'status',
+      fields: [
+        { key: 'title', label: 'Title', type: 'text', required: true, system: true, onCard: true },
+        { key: 'status', label: 'Status', type: 'select', options: [{ value: 'todo', label: 'To Do', color: 'gray' }, { value: 'doing', label: 'In Progress', color: 'blue' }, { value: 'done', label: 'Done', color: 'green', done: true }] },
+        { key: 'dueDate', label: 'Due date', type: 'date', due: true, onCard: true },
+        { key: 'notes', label: 'Notes', type: 'longtext' },
+      ],
+    };
+  }
+
+  async function createSection(form) {
+    const tplId = (form.querySelector('input[name=tpl]:checked') || {}).value || '';
+    const tpl = window.TEMPLATES.find((t) => t.id === tplId);
+    const name = form.elements.name.value.trim() || (tpl ? tpl.name : '');
+    if (!name) { toast('Give the section a name.', true); return; }
+    const spec = tpl ? Object.assign(window.sectionFromTemplate(tpl, S.sections), { name }) : blankSection(name);
+    const btn = $('#saveBtn');
+    btn.disabled = true;
+    try {
+      const res = await API.call('section.create', spec);
+      res.section.myLevel = 'manager';
+      replaceSection(res.section);
+      closeDrawer();
+      toast('Section created');
+      location.hash = tpl ? '#s/' + res.section.id : '#s/' + res.section.id + '/customize';
+      render();
+    } catch (e) { btn.disabled = false; handleError(e); }
+  }
+
+  async function seedSections() {
+    try {
+      for (const t of window.TEMPLATES) {
+        if (S.sections.some((s) => s.template === t.id && !s.archived)) continue;
+        const res = await API.call('section.create', window.sectionFromTemplate(t, S.sections));
+        res.section.myLevel = 'manager';
+        replaceSection(res.section);
+      }
+      toast('Standard sections created');
+      render();
+    } catch (e) { handleError(e); }
+  }
+
+  async function moveSection(id, dir) {
+    const live = liveSections();
+    const i = live.findIndex((s) => s.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= live.length) return;
+    const a = live[i];
+    const b = live[j];
+    try {
+      const ra = await API.call('section.update', { id: a.id, patch: { order: b.order } });
+      const rb = await API.call('section.update', { id: b.id, patch: { order: a.order } });
+      replaceSection(ra.section);
+      replaceSection(rb.section);
+      render();
+    } catch (e) { handleError(e); }
+  }
+
+  async function archiveSection(id, archived) {
+    if (archived && S._armSec !== id) { S._armSec = id; render(); return; }
+    S._armSec = null;
+    try {
+      const res = await API.call('section.update', { id, patch: { archived } });
+      replaceSection(res.section);
+      toast(archived ? 'Section removed. You can restore it below.' : 'Section restored');
+      render();
+    } catch (e) { handleError(e); }
   }
 
   // ------------------------------------------------------------ events
@@ -1065,73 +1106,177 @@
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
     if (!el) return;
-    const act = el.dataset.act;
-    switch (act) {
-      case 'open': openRecord(el.dataset.entity, el.dataset.id); break;
-      case 'new': openRecord(el.dataset.entity, null, { project: el.dataset.project, milestone: el.dataset.milestone === '1' }); break;
-      case 'go': location.hash = el.dataset.href; break;
+    const d = el.dataset;
+    switch (d.act) {
+      case 'open': openItem(d.id); break;
+      case 'new': newItem(d.section); break;
+      case 'new-linked': closeDrawer(); newItem(d.section, { [d.field]: d.target }); break;
       case 'close-drawer': closeDrawer(); break;
-      case 'delete': deleteRecord(); break;
+      case 'item-delete': deleteItem(); break;
       case 'add-comment': addComment(); break;
       case 'upload': { const fi = $('#fileInput'); if (fi) fi.click(); break; }
-      case 'rfq-to-project': rfqToProject(); break;
-      case 'tab': S.f.projTab = el.dataset.tab; render(); break;
-      case 'rfq-view':
-        S.f.rfqView = el.dataset.v;
-        try { localStorage.setItem('projecthub_rfqView', S.f.rfqView); } catch (err) { /* storage blocked */ }
-        render();
-        break;
-      case 'toggle-done': {
-        const t = find('tasks', el.dataset.id);
-        if (t) moveRecord('tasks', t.id, 'status', t.status === 'Done' ? 'In Progress' : 'Done');
-        break;
-      }
+      case 'file-open': openFile(d.file); break;
+      case 'view': S.f.view[d.section] = d.v; saveViews(); render(); break;
       case 'refresh': loadData().then(() => toast('Up to date')); break;
       case 'signout': signOut(); break;
-      case 'reset-demo':
-        if (API.reset) { API.reset(); S.loaded = false; loadData().then(() => toast('Example data restored')); }
+      case 'demo-login':
+        try { API.login(d.id); loadData(); } catch (err) { showLogin(err.message); }
         break;
+      case 'reset-demo': API.reset(); showLogin(); toast('Example data restored'); break;
+      case 'seed-sections': seedSections(); break;
+      case 'sec-new': openNewSection(); break;
+      case 'sec-move': moveSection(d.id, Number(d.dir)); break;
+      case 'sec-archive': archiveSection(d.id, true); break;
+      case 'sec-restore': archiveSection(d.id, false); break;
+      case 'user-new': openUser(null); break;
+      case 'user-edit': openUser(d.id); break;
+      case 'user-delete':
+        if (!S.drawer.armed) { openUser(S.drawer.id, true); break; }
+        API.call('user.remove', { id: S.drawer.id }).then(() => {
+          const gone = S.drawer.id;
+          S.users = S.users.filter((u) => u.id !== gone);
+          S.access = S.access.filter((a) => a.userId !== gone);
+          closeDrawer();
+          toast('User deleted');
+          render();
+        }).catch(handleError);
+        break;
+      // customize columns
+      case 'tpl-cancel': S.tpl = null; break;
+      case 'tpl-save': saveTemplate(); break;
+      case 'tpl-add': {
+        S.tpl.fields.push({ key: 'f' + uid(), label: 'New column', type: 'text', onCard: false });
+        rerenderTpl();
+        const inputs = document.querySelectorAll('[data-tf][data-prop="label"]');
+        if (inputs.length) { inputs[inputs.length - 1].focus(); inputs[inputs.length - 1].select(); }
+        break;
+      }
+      case 'tpl-move': {
+        const i = Number(d.i);
+        const j = i + Number(d.dir);
+        const fs = S.tpl.fields;
+        if (j < 0 || j >= fs.length) break;
+        [fs[i], fs[j]] = [fs[j], fs[i]];
+        rerenderTpl();
+        break;
+      }
+      case 'tpl-del': {
+        const f = S.tpl.fields[Number(d.i)];
+        if (S.tpl.armed !== f.key) { S.tpl.armed = f.key; rerenderTpl(); break; }
+        S.tpl.fields.splice(Number(d.i), 1);
+        if (S.tpl.stageField === f.key) S.tpl.stageField = '';
+        S.tpl.armed = null;
+        rerenderTpl();
+        break;
+      }
+      case 'opt-add': {
+        const f = S.tpl.fields[Number(d.i)];
+        f.options = f.options || [];
+        f.options.push({ value: 'o' + uid(), label: 'New option', color: 'gray' });
+        rerenderTpl();
+        break;
+      }
+      case 'opt-del': S.tpl.fields[Number(d.i)].options.splice(Number(d.j), 1); rerenderTpl(); break;
+      case 'opt-move': {
+        const os = S.tpl.fields[Number(d.i)].options;
+        const j = Number(d.j);
+        const k = j + Number(d.dir);
+        if (k < 0 || k >= os.length) break;
+        [os[j], os[k]] = [os[k], os[j]];
+        rerenderTpl();
+        break;
+      }
     }
   });
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && S.drawer) closeDrawer();
-    if (e.key === 'Enter' && e.target.matches('.card[data-act="open"]')) openRecord(e.target.dataset.entity, e.target.dataset.id);
+    if (e.key === 'Enter' && e.target.matches('.card[data-act="open"]')) openItem(e.target.dataset.id);
   });
 
   document.addEventListener('submit', (e) => {
-    if (e.target.id === 'recForm') { e.preventDefault(); saveForm(e.target); }
+    const id = e.target.id;
+    if (!['itemForm', 'userForm', 'sectionForm'].includes(id)) return;
+    e.preventDefault();
+    if (id === 'itemForm') saveItem(e.target);
+    if (id === 'userForm') saveUser(e.target);
+    if (id === 'sectionForm') createSection(e.target);
   });
+
+  function tplInput(t) {
+    if (!S.tpl) return false;
+    if (t.dataset.tpl) { S.tpl[t.dataset.tpl] = t.value; return t.dataset.tpl === 'stageField'; }
+    if (t.dataset.tf !== undefined) {
+      const f = S.tpl.fields[Number(t.dataset.tf)];
+      const prop = t.dataset.prop;
+      if (t.type === 'checkbox') { if (t.checked) f[prop] = true; else delete f[prop]; return false; }
+      f[prop] = t.value;
+      if (prop === 'type') {
+        if (f.type === 'select' && !(f.options || []).length) f.options = [{ value: 'o' + uid(), label: 'Option 1', color: 'gray' }];
+        if (!['date', 'datetime'].includes(f.type)) delete f.due;
+        if (!['currency', 'number'].includes(f.type)) delete f.total;
+        if (f.type !== 'select' && S.tpl.stageField === f.key) S.tpl.stageField = '';
+        return true;
+      }
+      return false;
+    }
+    if (t.dataset.to !== undefined) {
+      const [i, j] = t.dataset.to.split('.').map(Number);
+      const o = S.tpl.fields[i].options[j];
+      const prop = t.dataset.prop;
+      if (prop === 'done') { if (t.checked) o.done = true; else delete o.done; return false; }
+      if (prop === 'alertDays') { const n = Number(t.value); if (n > 0) o.alertDays = n; else delete o.alertDays; return false; }
+      o[prop] = t.value;
+      return prop === 'color';
+    }
+    return false;
+  }
 
   document.addEventListener('change', (e) => {
     const t = e.target;
     if (t.id === 'fileInput' && t.files && t.files[0]) { uploadFile(t.files[0]); return; }
+    if (t.dataset.access) {
+      const [sid, uid2] = t.dataset.access.split('|');
+      t.className = 'lvl lvl-' + t.value;
+      setAccess(sid, uid2, t.value).catch((err) => { handleError(err); render(); });
+      return;
+    }
     if (t.dataset.filter) {
       S.f[t.dataset.filter] = t.value;
-      if (t.dataset.filter.startsWith('rfq') && $('#rfqBody')) $('#rfqBody').innerHTML = rfqBody();
-      else render();
+      const body = $('#secBody');
+      if (body) body.innerHTML = sectionBody(section(body.dataset.section)); else render();
+      return;
     }
+    if (tplInput(t)) rerenderTpl();
   });
 
   let searchTimer;
   document.addEventListener('input', (e) => {
     const t = e.target;
-    if (!t.dataset.filterInput) return;
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => {
-      S.f[t.dataset.filterInput] = t.value;
-      const body = $('#rfqBody');
-      if (body) body.innerHTML = rfqBody();
-    }, 150);
+    if (t.matches('[data-pick-filter]')) {
+      const q = t.value.toLowerCase();
+      t.closest('.pick-b').querySelectorAll('.prow').forEach((r) => { r.hidden = q && !r.textContent.toLowerCase().includes(q); });
+      return;
+    }
+    if (t.dataset.filterInput) {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        S.f[t.dataset.filterInput] = t.value;
+        const body = $('#secBody');
+        if (body) body.innerHTML = sectionBody(section(body.dataset.section));
+      }, 150);
+      return;
+    }
+    if (t.type !== 'checkbox' && t.tagName !== 'SELECT') tplInput(t);
   });
 
   // Drag and drop between board columns
-  let dragKey = null;
+  let dragId = null;
   document.addEventListener('dragstart', (e) => {
     const c = e.target.closest && e.target.closest('[data-drag]');
     if (!c) return;
-    dragKey = c.dataset.drag;
-    e.dataTransfer.setData('text/plain', dragKey);
+    dragId = c.dataset.drag;
+    e.dataTransfer.setData('text/plain', dragId);
     e.dataTransfer.effectAllowed = 'move';
     c.classList.add('dragging');
   });
@@ -1139,11 +1284,11 @@
     const c = e.target.closest && e.target.closest('[data-drag]');
     if (c) c.classList.remove('dragging');
     document.querySelectorAll('.drop-on').forEach((x) => x.classList.remove('drop-on'));
-    dragKey = null;
+    dragId = null;
   });
   document.addEventListener('dragover', (e) => {
-    const col = e.target.closest && e.target.closest('[data-drop]');
-    if (!col || !dragKey || dragKey.split(':')[0] !== col.dataset.dropEntity) return;
+    const col = e.target.closest && e.target.closest('[data-drop-section]');
+    if (!col || !dragId) return;
     e.preventDefault();
     if (!col.classList.contains('drop-on')) {
       document.querySelectorAll('.drop-on').forEach((x) => x.classList.remove('drop-on'));
@@ -1151,22 +1296,26 @@
     }
   });
   document.addEventListener('drop', (e) => {
-    const col = e.target.closest && e.target.closest('[data-drop]');
+    const col = e.target.closest && e.target.closest('[data-drop-section]');
     if (!col) return;
     e.preventDefault();
-    const key = e.dataTransfer.getData('text/plain') || dragKey;
+    const id = e.dataTransfer.getData('text/plain') || dragId;
     col.classList.remove('drop-on');
-    if (!key) return;
-    const [entity, id] = key.split(':');
-    if (entity !== col.dataset.dropEntity) return;
-    moveRecord(entity, id, col.dataset.dropField, col.dataset.drop);
+    const it = id && item(id);
+    if (it && it.sectionId === col.dataset.dropSection) moveItem(id, col.dataset.dropStage);
   });
 
-  window.addEventListener('hashchange', () => { closeDrawer(); render(); });
+  window.addEventListener('hashchange', () => {
+    closeDrawer();
+    const r = route();
+    if (!(r.view === 's' && r.sub === 'customize')) S.tpl = null;
+    S.f.q = '';
+    render();
+  });
 
   // Pick up teammates' changes every 90 s while the tab is visible and nothing is being edited
   setInterval(() => {
-    if (API.mode === 'remote' && S.loaded && !S.drawer && !dragKey && document.visibilityState === 'visible') loadData(true);
+    if (API.mode === 'remote' && S.loaded && !S.drawer && !S.tpl && !dragId && document.visibilityState === 'visible') loadData(true);
   }, 90000);
 
   boot();
