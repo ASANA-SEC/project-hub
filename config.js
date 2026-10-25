@@ -4,6 +4,6 @@
 window.APP_CONFIG = {
   COMPANY_NAME: 'Project Hub',
   CURRENCY: 'RM',
-  API_URL: '',          // Apps Script web app URL, ends with /exec
-  GOOGLE_CLIENT_ID: '', // OAuth client ID, ends with .apps.googleusercontent.com
+  API_URL: 'https://script.google.com/macros/s/AKfycbwIm0OEOo6htJOE1ivBNHeXj5HU8jlvJDvnNPNuBe3BxJS_qcfin5c9b9hRt2L0of4s/exec',
+  GOOGLE_CLIENT_ID: '565076969693-m0aeshobnlvb0p542p3flt0g6cudjopi.apps.googleusercontent.com',
 };

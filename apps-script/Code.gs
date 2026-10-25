@@ -17,7 +17,7 @@
  * collaborators and named people are added as guests, so it shows in their own Google Calendar.
  */
 
-const CLIENT_ID = 'PASTE-YOUR-OAUTH-CLIENT-ID.apps.googleusercontent.com';
+const CLIENT_ID = '565076969693-m0aeshobnlvb0p542p3flt0g6cudjopi.apps.googleusercontent.com';
 const APP_URL = 'https://asana-sec.github.io/project-hub/';
 // false: guests are added quietly. true: Google also emails an invitation the first time.
 const SEND_INVITE_EMAILS = false;
