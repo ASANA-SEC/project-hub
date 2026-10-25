@@ -82,6 +82,7 @@ var Core = (function () {
     deleteItem: function (ctx, it, s) { return ctx.me.isSuper || (live(s) && rank(level(ctx, s.id)) >= 3); },
     comment: function (ctx, it, s) { return ctx.me.isSuper || (live(s) && (rank(level(ctx, s.id)) >= 2 || onItem(ctx, it))); },
     template: function (ctx, s) { return ctx.me.isSuper || (live(s) && rank(level(ctx, s.id)) >= 4); },
+    report: function (ctx, s) { return ctx.me.isSuper || (live(s) && rank(level(ctx, s.id)) >= 4); },
   };
 
   // ------------------------------------------------------------ cleaning input

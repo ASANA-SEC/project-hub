@@ -742,6 +742,233 @@
       <button type="button" class="ibtn" data-act="sort-dir" data-section="${esc(s.id)}" title="${st.dir === 'desc' ? 'Descending' : 'Ascending'}" aria-label="Sort direction: ${st.dir === 'desc' ? 'descending' : 'ascending'}"${st.key ? '' : ' disabled'}>${st.dir === 'desc' ? '↓' : '↑'}</button></label>`;
   }
 
+  // ---- export report (Excel / PDF) of what the section shows now
+
+  const LIBS = {
+    xlsx: ['https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'],
+    pdf: ['https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'],
+  };
+  const loadedLibs = {};
+  function loadScript(src) {
+    if (!loadedLibs[src]) {
+      loadedLibs[src] = new Promise((resolve, reject) => {
+        const el = document.createElement('script');
+        el.src = src;
+        el.onload = resolve;
+        el.onerror = () => { delete loadedLibs[src]; reject(new Error('Could not load the report tool. Check your internet connection and try again.')); };
+        document.head.appendChild(el);
+      });
+    }
+    return loadedLibs[src];
+  }
+
+  function reportData(s) {
+    const list = sectionFilter(s).sort(sorter(s));
+    const cols = s.fields.concat([
+      { key: '_editors', label: 'Editors', type: 'people' },
+      { key: '_collaborators', label: 'Collaborators', type: 'people' },
+      { key: '_alerts', label: 'Alerts', type: 'text' },
+      { key: '_updated', label: 'Last updated', type: 'datetime' },
+    ]);
+    // Excel serial number from local date parts (avoids the seconds drift of JS Date conversion)
+    const serial = (d) => (d ? Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()) / 864e5 + 25569 : '');
+    const cell = (it, f, excel) => {
+      if (f.key === '_alerts') return [dueInfo(s, it), ageInfo(s, it)].filter((x) => x && x.sev >= 1).map((x) => x.text).join('; ');
+      const v = fv(it, f);
+      if (f.type === 'people') return v.map(userName).join(', ');
+      if (blank(v) || v === false) return '';
+      switch (f.type) {
+        case 'number': case 'currency': return excel ? Number(v) : f.type === 'currency' ? money(v) : nf.format(v);
+        case 'percent': return excel ? Number(v) / 100 : nf.format(v) + '%';
+        case 'date': return excel ? serial(parseDay(v)) : fmtDate(v);
+        case 'datetime': return excel ? serial(parseDT(v)) : f.key.startsWith('_') ? fmtDate(v) + ' ' + new Date(v).toTimeString().slice(0, 5) : fmtDT(v);
+        case 'select': { const o = optOf(f, v); return o ? o.label : ''; }
+        case 'person': return userName(v);
+        case 'checkbox': return 'Yes';
+        case 'link': { const t = item(v); return t ? t.title : ''; }
+        default: return String(v);
+      }
+    };
+    const rules = fstate(s.id).rules.map((r) => {
+      const f = colOf(s, r.key);
+      if (!f) return '';
+      const opLabel = (OPS[opGroup(f.type)].find((o) => o[0] === r.op) || [, r.op])[1];
+      let v = r.value;
+      if (v && f.type === 'select') v = (optOf(f, v) || {}).label || v;
+      if (v && (f.type === 'person' || f.type === 'people')) v = userName(v);
+      if (v && f.type === 'link') v = (item(v) || {}).title || v;
+      return f.label + ' ' + opLabel + (NO_VALUE.includes(r.op) || !v ? '' : ' ' + v);
+    }).filter(Boolean);
+    if (S.f.q) rules.unshift('Search “' + S.f.q + '”');
+    if (S.f.who === 'mine') rules.unshift('Only my items');
+    const sf = stageF(s);
+    const byStage = sf ? sf.options.map((o) => ({ label: o.label, items: list.filter((it) => val(it, sf) === o.value) })).filter((x) => x.items.length) : [];
+    const totals = s.fields.filter((f) => f.total);
+    const st = fstate(s.id).sort;
+    const sortCol = st.key && colOf(s, st.key);
+    return {
+      list, cols, cell, rules, byStage, totals, sf,
+      sortText: sortCol ? sortCol.label + (st.dir === 'desc' ? ' (descending)' : ' (ascending)') : 'Deadline',
+      when: new Date(),
+      title: s.name + ' report',
+      file: (s.name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'Section') + '_' + today(),
+    };
+  }
+
+  async function exportReport(s, fmt, btn) {
+    if (!s || !can.report(ctx(), s)) { toast('Only this section’s managers and super admins can export reports.', true); return; }
+    const r = reportData(s);
+    if (!r.list.length) { toast('Nothing to export. Clear the search or filters first.', true); return; }
+    const label = btn.querySelector('b').textContent;
+    btn.disabled = true;
+    btn.querySelector('b').textContent = 'Preparing…';
+    try {
+      for (const src of LIBS[fmt]) await loadScript(src);
+      if (fmt === 'xlsx') exportXlsx(s, r); else exportPdf(s, r);
+      toast('Report downloaded');
+      const menu = btn.closest('details');
+      if (menu) menu.open = false;
+    } catch (e) {
+      toast(e.message || 'Could not create the report.', true);
+    } finally {
+      btn.disabled = false;
+      btn.querySelector('b').textContent = label;
+    }
+  }
+
+  function exportXlsx(s, r) {
+    const XL = window.XLSX;
+    const header = r.cols.map((f) => f.label);
+    const rows = r.list.map((it) => r.cols.map((f) => r.cell(it, f, true)));
+    const ws = XL.utils.aoa_to_sheet([header].concat(rows));
+    // Number formats by column type
+    r.cols.forEach((f, c) => {
+      const fmt = { currency: '#,##0.00', number: '#,##0.##', percent: '0%', date: 'd mmm yyyy', datetime: 'd mmm yyyy hh:mm' }[f.type];
+      if (!fmt) return;
+      for (let i = 1; i <= rows.length; i++) {
+        const ref = XL.utils.encode_cell({ r: i, c });
+        if (ws[ref] && ws[ref].v !== '') ws[ref].z = fmt;
+      }
+    });
+    if (r.totals.length) {
+      const totalRow = r.cols.map((f, c) => (c === 0 ? 'Total' : f.total ? sum(r.list, (it) => val(it, f)) : ''));
+      XL.utils.sheet_add_aoa(ws, [totalRow], { origin: { r: rows.length + 1, c: 0 } });
+      r.cols.forEach((f, c) => { if (f.total) ws[XL.utils.encode_cell({ r: rows.length + 1, c })].z = '#,##0.00'; });
+    }
+    ws['!cols'] = r.cols.map((f, c) => ({ wch: Math.min(f.type === 'longtext' ? 60 : 40, Math.max(10, f.label.length + 2, ...rows.slice(0, 200).map((row) => (['date', 'datetime'].includes(f.type) ? 18 : String(row[c] || '').length + 2)))) }));
+    ws['!autofilter'] = { ref: XL.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: r.cols.length - 1 } }) };
+
+    const summary = [
+      [r.title],
+      ['Generated', r.when.toLocaleString('en-MY'), 'by ' + (S.me.name || S.me.id)],
+      ['Items', r.list.length],
+      ['Filters', r.rules.length ? r.rules.join('; ') : 'None (all items you can see)'],
+      ['Sorted by', r.sortText],
+      [],
+    ];
+    if (r.byStage.length) {
+      summary.push([r.sf.label, 'Items'].concat(r.totals.map((f) => f.label + ' (' + CUR + ')')));
+      r.byStage.forEach((g) => summary.push([g.label, g.items.length].concat(r.totals.map((f) => sum(g.items, (it) => val(it, f))))));
+      summary.push(['Total', r.list.length].concat(r.totals.map((f) => sum(r.list, (it) => val(it, f)))));
+    } else if (r.totals.length) {
+      r.totals.forEach((f) => summary.push([f.label + ' (' + CUR + ')', sum(r.list, (it) => val(it, f))]));
+    }
+    const ws2 = XL.utils.aoa_to_sheet(summary);
+    ws2['!cols'] = [{ wch: 26 }, { wch: 22 }].concat(r.totals.map(() => ({ wch: 20 })));
+    Object.keys(ws2).forEach((ref) => { if (ref[0] !== '!' && typeof ws2[ref].v === 'number' && ws2[ref].v >= 1000) ws2[ref].z = '#,##0.00'; });
+
+    const wb = XL.utils.book_new();
+    XL.utils.book_append_sheet(wb, ws, 'Items');
+    XL.utils.book_append_sheet(wb, ws2, 'Summary');
+    XL.writeFile(wb, r.file + '.xlsx');
+  }
+
+  function exportPdf(s, r) {
+    const cols = r.cols.filter((f) => f.type !== 'longtext' && f.key !== '_collaborators');
+    const body = r.list.map((it) => cols.map((f) => r.cell(it, f, false)));
+    const allText = [r.title, ...r.rules].concat(...body).join(' ');
+    // The built-in PDF fonts only cover Latin text. For Chinese and other scripts, use the browser's own PDF printer.
+    if (/[^\u0000-ɏ -⁯₠-⃏←-⇿✓]/.test(allText)) { printReport(r, cols, body); return; }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const W = doc.internal.pageSize.getWidth();
+    const ink = [24, 34, 42];
+    const muted = [117, 129, 138];
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.setTextColor(...ink);
+    doc.text(r.title, 36, 42);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(...muted);
+    const meta = [
+      'Generated ' + r.when.toLocaleString('en-MY') + ' by ' + (S.me.name || S.me.id) + ' · ' + r.list.length + ' item' + (r.list.length === 1 ? '' : 's') + ' · sorted by ' + r.sortText,
+      'Filters: ' + (r.rules.length ? r.rules.join('; ') : 'none (all items you can see)'),
+    ];
+    let y = 58;
+    meta.forEach((line) => { doc.splitTextToSize(line, W - 72).forEach((l) => { doc.text(l, 36, y); y += 12; }); });
+
+    if (r.byStage.length || r.totals.length) {
+      const head = [[r.sf ? r.sf.label : 'Group', 'Items'].concat(r.totals.map((f) => f.label))];
+      const rows = (r.byStage.length ? r.byStage : [{ label: 'All', items: r.list }]).map((g) => [g.label, g.items.length].concat(r.totals.map((f) => money(sum(g.items, (it) => val(it, f))))));
+      if (r.byStage.length > 1) rows.push(['Total', r.list.length].concat(r.totals.map((f) => money(sum(r.list, (it) => val(it, f))))));
+      doc.autoTable({
+        head, body: rows, startY: y + 4, margin: { left: 36, right: 36 }, tableWidth: 'wrap',
+        styles: { fontSize: 8, cellPadding: 3, textColor: ink }, headStyles: { fillColor: [226, 237, 242], textColor: ink, fontStyle: 'bold' },
+        columnStyles: Object.fromEntries(r.totals.map((f, i) => [i + 2, { halign: 'right' }]).concat([[1, { halign: 'right' }]])),
+        didParseCell: (d) => { if (d.section === 'body' && d.row.raw[0] === 'Total') d.cell.styles.fontStyle = 'bold'; },
+      });
+      y = doc.lastAutoTable.finalY + 14;
+    }
+
+    const right = Object.fromEntries(cols.map((f, i) => [i, ['currency', 'number', 'percent'].includes(f.type) ? { halign: 'right' } : f.key === 'title' ? { cellWidth: 150, fontStyle: 'bold' } : {}]));
+    const foot = r.totals.length ? [cols.map((f, i) => (i === 0 ? 'Total' : f.total ? money(sum(r.list, (it) => val(it, f))) : ''))] : undefined;
+    doc.autoTable({
+      head: [cols.map((f) => f.label)], body, foot, startY: y, margin: { left: 36, right: 36, bottom: 36 },
+      styles: { fontSize: cols.length > 12 ? 6.5 : 7.5, cellPadding: 3, overflow: 'linebreak', textColor: ink, lineColor: [224, 228, 226], lineWidth: 0.5 },
+      headStyles: { fillColor: [29, 91, 121], textColor: 255, fontStyle: 'bold' },
+      footStyles: { fillColor: [247, 248, 247], textColor: ink, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [250, 251, 250] },
+      columnStyles: right,
+      showFoot: 'lastPage',
+      didParseCell: (d) => {
+        if (d.section === 'body' && cols[d.column.index].key === '_alerts' && d.cell.raw) d.cell.styles.textColor = [177, 39, 31];
+      },
+    });
+    const pages = doc.getNumberOfPages();
+    for (let p = 1; p <= pages; p++) {
+      doc.setPage(p);
+      doc.setFontSize(8);
+      doc.setTextColor(...muted);
+      doc.text('Project Hub · ' + s.name, 36, doc.internal.pageSize.getHeight() - 18);
+      doc.text('Page ' + p + ' of ' + pages, W - 36, doc.internal.pageSize.getHeight() - 18, { align: 'right' });
+    }
+    doc.save(r.file + '.pdf');
+  }
+
+  /** Report as a print-ready page for text the PDF fonts cannot draw (e.g. Chinese). The browser saves it as PDF. */
+  function printReport(r, cols, body) {
+    const w = window.open('', '_blank');
+    if (!w) { toast('Allow pop-ups for this site to create the PDF.', true); return; }
+    const tot = (f, items) => money(sum(items, (it) => val(it, f)));
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(r.file)}</title>
+      <style>@page{size:A4 landscape;margin:12mm}body{font:10px/1.4 "Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;color:#18222a;margin:0}
+      h1{font-size:18px;margin:0 0 4px}p{margin:0 0 3px;color:#5d6a73}table{border-collapse:collapse;width:100%;margin-top:10px}
+      th{background:#1d5b79;color:#fff;text-align:left;padding:4px 5px}td{border-bottom:1px solid #e0e4e2;padding:4px 5px;vertical-align:top}
+      .r{text-align:right}.sum{width:auto}.sum th{background:#e2edf2;color:#18222a}tfoot td{font-weight:bold;background:#f7f8f7}thead{display:table-header-group}tr{page-break-inside:avoid}</style></head><body>
+      <h1>${esc(r.title)}</h1>
+      <p>Generated ${esc(r.when.toLocaleString('en-MY'))} by ${esc(S.me.name || S.me.id)} · ${r.list.length} items · sorted by ${esc(r.sortText)}</p>
+      <p>Filters: ${esc(r.rules.length ? r.rules.join('; ') : 'none (all items you can see)')}</p>
+      ${r.byStage.length ? `<table class="sum"><thead><tr><th>${esc(r.sf.label)}</th><th class="r">Items</th>${r.totals.map((f) => `<th class="r">${esc(f.label)}</th>`).join('')}</tr></thead>
+        <tbody>${r.byStage.map((g) => `<tr><td>${esc(g.label)}</td><td class="r">${g.items.length}</td>${r.totals.map((f) => `<td class="r">${tot(f, g.items)}</td>`).join('')}</tr>`).join('')}</tbody></table>` : ''}
+      <table><thead><tr>${cols.map((f) => `<th class="${['currency', 'number', 'percent'].includes(f.type) ? 'r' : ''}">${esc(f.label)}</th>`).join('')}</tr></thead>
+      <tbody>${body.map((row) => `<tr>${row.map((c, i) => `<td class="${['currency', 'number', 'percent'].includes(cols[i].type) ? 'r' : ''}">${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody>
+      ${r.totals.length ? `<tfoot><tr>${cols.map((f, i) => `<td class="r">${i === 0 ? 'Total' : f.total ? tot(f, r.list) : ''}</td>`).join('')}</tr></tfoot>` : ''}</table>
+      <script>window.onload=function(){window.print();}<\/script></body></html>`);
+    w.document.close();
+  }
+
   function refreshSection(panelToo) {
     const body = $('#secBody');
     if (!body) return;
@@ -764,6 +991,12 @@
       <div class="head"><div><h1>${esc(s.name)}</h1>
         <div class="sub">${all.length} item${all.length === 1 ? '' : 's'}${hasSectionAccess(s) ? ` · your access: ${LEVEL_LABEL[lvl]}` : ' · you see only the items you are assigned to'}</div></div>
         <div class="toolbar">
+          ${can.report(ctx(), s) ? `<details class="menu"><summary class="btn">Export report</summary>
+            <div class="menu-b" role="menu">
+              <button type="button" role="menuitem" data-act="export" data-fmt="xlsx" data-section="${esc(s.id)}"><b>Excel (.xlsx)</b><small>Every column, plus a summary sheet</small></button>
+              <button type="button" role="menuitem" data-act="export" data-fmt="pdf" data-section="${esc(s.id)}"><b>PDF</b><small>Printable A4 landscape report</small></button>
+              <p>Exports what is shown now: your search, filters and sort.</p>
+            </div></details>` : ''}
           ${can.template(ctx(), s) ? `<a class="btn" href="#s/${esc(s.id)}/customize">Customize columns</a>` : ''}
           ${can.create(ctx(), s) ? `<button class="btn primary" data-act="new" data-section="${esc(s.id)}">+ New item</button>` : ''}
         </div></div>
@@ -1421,6 +1654,7 @@
       case 'upload': { const fi = $('#fileInput'); if (fi) fi.click(); break; }
       case 'file-open': openFile(d.file); break;
       case 'view': S.f.view[d.section] = d.v; saveViews(); render(); break;
+      case 'export': exportReport(section(d.section), d.fmt, el); break;
       // calendar
       case 'cal-view': S.f.cal.view = d.v; render(); break;
       case 'cal-day': S.f.cal.anchor = d.day; S.f.cal.view = 'week'; render(); break;
