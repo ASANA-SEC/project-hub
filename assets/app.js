@@ -1261,7 +1261,7 @@
         <div class="pane-h"><div><div class="k">User</div><h2 id="paneTitle">${id ? esc(u.name || u.id) : 'Add user'}</h2></div><button type="button" class="x" data-act="close-drawer" aria-label="Close">×</button></div>
         <div class="pane-b">
           <form class="form" id="userForm" novalidate>
-            <label class="fld wide"><span>Google email *</span><input type="email" name="id" value="${esc(u.id)}" autocomplete="off"${id ? ' disabled' : ' required'}></label>
+            <label class="fld wide"><span>Google email *</span><input type="email" name="email" value="${esc(u.id)}" autocomplete="off"${id ? ' disabled' : ' required'}></label>
             <label class="fld wide"><span>Name</span><input type="text" name="name" value="${esc(u.name)}" placeholder="Filled in from Google at first sign-in if left empty"></label>
             <label class="fld chk wide"><input type="checkbox" name="active"${u.active !== false ? ' checked' : ''}${isSuperRow ? ' disabled' : ''}><span>Can sign in</span></label>
             ${!isSuperRow && secs.length ? `<div class="fld wide"><span>Section access</span><div class="acc-list">${secs.map((s) => `<label class="acc">${secMark(s)}<span>${esc(s.name)}</span><select name="acc_${esc(s.id)}">${Core.LEVELS.map((l) => `<option value="${l}"${lvl(s.id) === l ? ' selected' : ''}>${l === 'none' ? 'No access' : LEVEL_LABEL[l]}</option>`).join('')}</select></label>`).join('')}</div></div>` : ''}
@@ -1274,12 +1274,12 @@
           </form>
         </div>
       </div>`;
-    openDrawer(id ? 'input[name=name]' : 'input[name=id]');
+    openDrawer(id ? 'input[name=name]' : 'input[name=email]');
   }
 
   async function saveUser(form) {
     const id = S.drawer.id;
-    const email = id || form.elements.id.value.trim().toLowerCase();
+    const email = id || form.elements.email.value.trim().toLowerCase();
     const name = form.elements.name.value.trim();
     const active = form.elements.active.checked;
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { toast('Enter a valid Google email.', true); return; }
@@ -1552,7 +1552,8 @@
   });
 
   document.addEventListener('submit', (e) => {
-    const id = e.target.id;
+    // getAttribute, not .id: a field named "id" or "email" would shadow the form's own properties
+    const id = e.target.getAttribute('id');
     if (!['itemForm', 'userForm', 'sectionForm'].includes(id)) return;
     e.preventDefault();
     if (id === 'itemForm') saveItem(e.target);

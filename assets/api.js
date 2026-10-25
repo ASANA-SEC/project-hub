@@ -215,5 +215,7 @@
     reset() { store.reset(); this.logout(); },
   };
 
-  window.API = CFG.API_URL ? Remote : Demo;
+  // On this computer, http://localhost:8765/?demo forces demo mode for testing.
+  const forceDemo = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && /[?&]demo\b/.test(location.search);
+  window.API = CFG.API_URL && !forceDemo ? Remote : Demo;
 })();
