@@ -19,7 +19,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 from playwright.sync_api import sync_playwright
 
-from guide_content import BLOCKS, SUBTITLE, TITLE, VERSION
+from guide_content import BLOCKS, SUBTITLE, TITLE, VERSION, VIDEOS
 from hub import BASE, ROOT
 
 SRC = ROOT / 'guide' / 'img'
@@ -46,6 +46,31 @@ def inline_html(text):
 
 def slug(text):
     return re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')
+
+
+def videos():
+    """Videos that have a link, with the Google Drive file id when the link is a Drive file."""
+    out = []
+    for title, length, desc, url in VIDEOS:
+        if not url:
+            continue
+        m = re.search(r'/file/d/([\w-]+)', url) or re.search(r'[?&]id=([\w-]+)', url)
+        out.append({'title': title, 'length': length, 'desc': desc, 'url': url, 'id': m.group(1) if m else ''})
+    return out
+
+
+def videos_html():
+    vs = videos()
+    if not vs:
+        return '', ''
+    cards = ''.join(
+        f'''<article class="vcard">{f'<div class="vframe"><iframe src="https://drive.google.com/file/d/{v["id"]}/preview" allow="autoplay; fullscreen" allowfullscreen loading="lazy" title="{html.escape(v["title"])}"></iframe></div>' if v["id"] else ''}
+        <h3>{html.escape(v["title"])} <small>{html.escape(v["length"])}</small></h3><p>{html.escape(v["desc"])}</p>
+        <a href="{html.escape(v["url"])}" target="_blank" rel="noopener">Open in Google Drive</a><span class="plink">{html.escape(v["url"])}</span></article>'''
+        for v in vs)
+    toc = '<li><a href="#videos">Video tutorials</a></li>'
+    body = f'<section class="chapter" id="videos"><h1><span>▶</span>Video tutorials</h1><p>Short videos with voice-over and subtitles. Click play, or open a video in Google Drive to watch it full screen.</p><div class="vgrid">{cards}</div></section>'
+    return toc, body
 
 
 # ------------------------------------------------------------------ HTML
@@ -82,6 +107,10 @@ def build_html():
             body.append(f'<div class="tw"><table><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table></div>')
     toc = [t + '</ol></li>' for t in toc]
     body.append('</section>')
+    vtoc, vbody = videos_html()
+    if vtoc:
+        toc.insert(0, vtoc)
+        body.insert(0, vbody)
     page = f'''<!doctype html>
 <html lang="en">
 <head>
@@ -144,6 +173,16 @@ td:first-child {{ font-weight:500; white-space:nowrap; }}
   h2, h1 {{ page-break-after:avoid; }} tr, .callout {{ page-break-inside:avoid; }}
   .toc-print {{ display:block !important; page-break-after:always; }}
 }}
+.vgrid {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:18px; margin-top:14px; }}
+.vcard {{ border:1px solid var(--line); border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:6px; }}
+.vframe {{ position:relative; aspect-ratio:16/9; border-radius:7px; overflow:hidden; background:#000; }}
+.vframe iframe {{ position:absolute; inset:0; width:100%; height:100%; border:0; }}
+.vcard h3 {{ margin:4px 0 0; font-size:15px; }}
+.vcard h3 small {{ color:var(--ink-3); font-weight:400; margin-left:4px; }}
+.vcard p {{ margin:0; font-size:13.5px; color:var(--ink-2); }}
+.vcard a {{ font-size:13.5px; color:var(--accent); font-weight:500; }}
+.plink {{ display:none; }}
+@media print {{ .vframe {{ display:none; }} .vcard a {{ display:none; }} .plink {{ display:block; font-size:8.5pt; word-break:break-all; color:#1d5b79; }} .vgrid {{ display:block; }} .vcard {{ margin-bottom:8px; page-break-inside:avoid; }} }}
 .toc-print {{ display:none; }}
 .toc-print h1 {{ display:block; }}
 .toc-print ol {{ font-size:11pt; line-height:1.8; list-style:none; padding-left:0; }}
@@ -228,6 +267,27 @@ def field(par, instr):
             r._r.append(el)
 
 
+def hyperlink(par, url, text):
+    """Clickable link in a Word paragraph."""
+    r_id = par.part.relate_to(url, 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink', is_external=True)
+    link = OxmlElement('w:hyperlink')
+    link.set(qn('r:id'), r_id)
+    run = OxmlElement('w:r')
+    props = OxmlElement('w:rPr')
+    color = OxmlElement('w:color')
+    color.set(qn('w:val'), '1D5B79')
+    underline = OxmlElement('w:u')
+    underline.set(qn('w:val'), 'single')
+    props.append(color)
+    props.append(underline)
+    run.append(props)
+    t = OxmlElement('w:t')
+    t.text = text
+    run.append(t)
+    link.append(run)
+    par._p.append(link)
+
+
 def build_docx():
     doc = Document()
     sec = doc.sections[0]
@@ -266,6 +326,15 @@ def build_docx():
     doc.add_heading('Contents', level=1)
     field(doc.add_paragraph(), 'TOC \\o "1-2" \\h \\z \\u')
     runs(doc.add_paragraph(), 'If the contents list is empty, right-click here and choose Update Field.', size=9, color=MUTED)
+
+    if videos():
+        doc.add_page_break()
+        doc.add_heading('Video tutorials', level=1)
+        runs(doc.add_paragraph(), 'Short videos with voice-over and subtitles. Click a link to watch in Google Drive.')
+        for v in videos():
+            par = doc.add_paragraph(style='List Bullet')
+            runs(par, f"**{v['title']}** ({v['length']}) — {v['desc']} ")
+            hyperlink(par, v['url'], 'Watch')
 
     n1 = n2 = 0
     for b in BLOCKS:

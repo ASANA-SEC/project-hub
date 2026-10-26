@@ -9,6 +9,16 @@ TITLE = 'Project Hub User Guide'
 SUBTITLE = 'Tenders, projects, tasks and progress claims in one place'
 VERSION = 'Version 1.0 · October 2026'
 
+# Video tutorials: paste each Google Drive share link. Entries without a link are left out of the guide.
+VIDEOS = [
+    ('Getting started', '1:22', 'Sign in, the dashboard, search, My Work and the calendar.', 'https://drive.google.com/file/d/1p0GOAbTQM5rJmtumwjvOvkaiDkKjqqZs/view?usp=sharing'),
+    ('Working with items', '1:25', 'Add an item, assign people, move it through stages, comment, share a link, full screen.', 'https://drive.google.com/file/d/1x4-5Khg69a8Eap-GP_x1pUWyY_jsDN1M/view?usp=sharing'),
+    ('Filters, sorting and reports', '0:52', 'Sort and filter a section and export a report.', 'https://drive.google.com/file/d/1KMewwVh-0uxaG5pGuhmDPRPSHLOIX1wT/view?usp=sharing'),
+    ('For section managers', '1:04', 'Customize columns, team performance, calendars and dashboard reports.', 'https://drive.google.com/file/d/1xgY_SuFE87hrDAehZ_zMF1ZqglcWy7Dl/view?usp=sharing'),
+    ('For super admins', '1:00', 'Users, access levels and sections.', 'https://drive.google.com/file/d/1pXKX7fMlPotWcf5XEPdH3NHIHlYez0B9/view?usp=sharing'),
+    ('Full guide (all five parts)', '5:44', 'Everything above in one video.', 'https://drive.google.com/file/d/1YoClpq_5nF7vRe8OGtArs23vrlz2AKPI/view?usp=sharing'),
+]
+
 BLOCKS = [
     ('h1', 'About Project Hub', 'about'),
     ('p', 'Project Hub is the company’s workspace for RFQs and tenders, projects, project tasks, and payment and claims. '
