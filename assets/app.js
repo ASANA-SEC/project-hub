@@ -312,12 +312,12 @@
     app.innerHTML = `
       <div class="shell">
         <aside class="side">
-          <div class="brand"><span class="mark">PH</span><div><b>${esc(CFG.COMPANY_NAME || 'Project Hub')}</b><small>Project Hub</small></div></div>
+          <div class="brand"><span class="mark">PH</span><div><b>${esc(CFG.COMPANY_NAME || 'Project Hub')}</b>${(CFG.COMPANY_NAME || 'Project Hub') === 'Project Hub' ? '' : '<small>Project Hub</small>'}</div></div>
           <button type="button" class="gs-btn" data-act="search-open" aria-label="Search all sections"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span class="lbl">Search</span><kbd>Ctrl K</kbd></button>
           <nav class="nav" id="nav"></nav>
           <div class="side-foot">
             <div class="me">${avatar(S.me.id, true)}<div class="who"><b>${esc(S.me.name || S.me.id)}</b><small>${S.me.isSuper ? 'Super admin' : esc(S.me.id)}</small></div></div>
-            <div class="links"><button type="button" data-act="refresh">Refresh</button><button type="button" data-act="signout">Sign out</button></div>
+            <div class="links"><a href="help.html" target="_blank" rel="noopener">Help</a><button type="button" data-act="refresh">Refresh</button><button type="button" data-act="signout">Sign out</button></div>
           </div>
         </aside>
         <main class="main" id="main"></main>
@@ -326,7 +326,7 @@
         <div class="scrim" data-act="search-close"></div>
         <div class="gs-box" role="dialog" aria-modal="true" aria-label="Search all sections">
           <div class="gs-in"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-            <input id="gsInput" type="search" placeholder="Search titles, numbers, clients, people, comments…" autocomplete="off" aria-label="Search">
+            <input id="gsInput" type="text" placeholder="Search titles, numbers, clients, people, comments…" autocomplete="off" aria-label="Search">
             <button type="button" class="x" data-act="search-close" aria-label="Close">×</button></div>
           <div id="gsResults" class="gs-res" role="listbox"></div>
           <div class="gs-foot">Searches every section you can open, plus items you are named on · ↑ ↓ to move · Enter to open · Esc to close</div>
@@ -447,7 +447,7 @@
   }
 
   function demoBanner() {
-    if (API.mode !== 'demo') return '';
+    if (API.mode !== 'demo' || API.clean) return '';
     return `<div class="banner"><b>Demo mode</b><span>Signed in as ${esc(S.me.name)} with example data saved in this browser only.</span><button type="button" data-act="signout">Switch account</button></div>`;
   }
 
@@ -593,7 +593,7 @@
 
     const secs = liveSections().filter((s) => dueF(s));
     const whoLabel = (opts.find((o) => o.value === c.who) || opts[0]).label;
-    const sync = API.mode === 'demo'
+    const sync = API.mode === 'demo' && !API.clean
       ? 'In the live version, every item with a deadline is also added to the Google Calendar of its editors, collaborators and named people.'
       : 'Items with a deadline are also added to the Google Calendar of their editors, collaborators and named people, and update when the item changes.';
     return `
@@ -2297,7 +2297,8 @@
       return;
     }
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
-    if (S.loaded && ((e.key === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !typing))) { e.preventDefault(); openSearch(); return; }
+    // Ctrl/Cmd + K (either case, so Caps Lock does not break it) or "/" opens search
+    if (S.loaded && ((String(e.key).toLowerCase() === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !typing))) { e.preventDefault(); openSearch(); return; }
     if (e.key === 'Escape' && S.drawer) closeDrawer();
     if (e.key === 'Enter' && e.target.matches('.card[data-act="open"]')) openItem(e.target.dataset.id);
   });

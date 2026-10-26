@@ -24,6 +24,22 @@
   - 栏位：Open（担任 Editor 或负责人的未完成项）、Late、Due ≤ 7 天、Waiting（卡在某阶段太久）、Completed（期间内完成）、On time %、平均完成天数、Collaborating
 - **Dashboard 导出**（Super admin 和 Manager）：「Export dashboard」勾选要导出的区块（Section 摘要、各阶段件数、Needs attention、My open work、Team performance），合成一份 Excel 或 PDF
 
+## 使用手册与教学视频
+
+- 平台左下角 **Help** 打开在线手册：`help.html`（可下载 PDF / Word：`guide/Project_Hub_User_Guide.pdf`、`.docx`）
+- 教学视频（英文旁白 + 字幕，5 支 + 1 支完整版）在仓库外的 `100_Todo/outputs/pm-platform-videos/`，可上传到 Google Drive 或 YouTube（不公开）后分享
+- 平台改版后重新产生（先在本机开 `http://localhost:8765`）：
+  ```bash
+  py -3 tools/shots.py
+  ```
+  ```bash
+  py -3 tools/build_guide.py
+  ```
+  ```bash
+  py -3 tools/record.py
+  ```
+  - 手册内容在 `tools/guide_content.py`，视频旁白和操作在 `tools/record.py`
+
 ## 日历与监看
 
 - 日期来源：每个 Section 里勾了「Deadline」的那个栏位。有时间的显示时间，只有日期的显示成全天

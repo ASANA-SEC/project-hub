@@ -216,6 +216,12 @@
   };
 
   // On this computer, http://localhost:8765/?demo forces demo mode for testing.
-  const forceDemo = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && /[?&]demo\b/.test(location.search);
+  // &reset starts from fresh example data; &as=<email> signs in as that example account (used to record the user guide).
+  const local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  const params = new URLSearchParams(location.search);
+  const forceDemo = local && params.has('demo');
+  if (forceDemo && params.has('reset')) store.reset();
+  if (forceDemo && params.get('as')) { try { Demo.login(params.get('as')); } catch (e) { /* unknown example account */ } }
+  Demo.clean = forceDemo && params.has('clean'); // hide the demo banner for user-guide screenshots
   window.API = CFG.API_URL && !forceDemo ? Remote : Demo;
 })();

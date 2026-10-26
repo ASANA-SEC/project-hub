@@ -571,3 +571,5 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
 .perf-kpis .panel { padding: 12px 14px; }
 .t.perf td { padding: 7px 10px; }
 .t.perf .segbar { height: 10px; }
+.side-foot .links a { color: var(--side-ink); text-decoration: underline; text-underline-offset: 3px; }
+.side-foot .links a:hover { color: var(--side-hi); }
