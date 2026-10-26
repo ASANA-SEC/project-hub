@@ -366,7 +366,7 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
 .prow small { color: var(--ink-3); margin-left: auto; font-size: 11.5px; }
 .acc-list, .tpl-list { display: flex; flex-direction: column; gap: 6px; }
 .acc { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
-.acc span { flex: 1; font-size: 13px; }
+.acc > span:not(.smark) { flex: 1; font-size: 13px; }
 .acc select { width: auto !important; min-width: 140px; }
 .tpl { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
 .tpl:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }

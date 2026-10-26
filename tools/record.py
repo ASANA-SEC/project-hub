@@ -321,9 +321,10 @@ def ch4():
 
     def stage(p):
         move(p, '.tf.stage')
-        p.wait_for_timeout(600)
+        move(p, '.tf.stage [data-prop=alertDays] >> nth=0')
+        p.wait_for_timeout(2600)
         click(p, '[data-act=tpl-save] >> nth=0')
-        p.wait_for_timeout(800)
+        p.wait_for_timeout(600)
 
     def perf(p):
         click(p, '#nav a[data-nav=performance]')
