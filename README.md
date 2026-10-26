@@ -16,6 +16,14 @@
   - PDF：A4 横向，包含摘要表、明细表、逾期提醒（红字）、页码
   - 资料里有中文时，PDF 会改用浏览器的「另存为 PDF」视窗产生（内置的 PDF 字体不支持中文），在视窗里选「另存为 PDF」即可
 
+- **全局搜索**：左上角「Search」或按 **Ctrl + K**（或 `/`），一次搜索所有你有权限的 Section：标题、编号、客户、人名、下拉选项、留言都搜得到
+- **分享链接**：打开任何 task，按「Copy link」复制链接发给同事；只有对这个 task 有权限的人打得开，打开时直接以全屏显示
+- **全屏**：task 视窗按「⤢ Full screen」展开成整页（左边栏位、右边附件和留言），系统会记住你的选择
+- **Team performance**（Super admin 和 Section Manager）：每个人跨 Section 的工作量和绩效一页看完，可以导出 Excel / PDF
+  - Super admin 看所有人、所有 Section；Manager 只看自己管理的 Section 的成员（不含 Super admin）
+  - 栏位：Open（担任 Editor 或负责人的未完成项）、Late、Due ≤ 7 天、Waiting（卡在某阶段太久）、Completed（期间内完成）、On time %、平均完成天数、Collaborating
+- **Dashboard 导出**（Super admin 和 Manager）：「Export dashboard」勾选要导出的区块（Section 摘要、各阶段件数、Needs attention、My open work、Team performance），合成一份 Excel 或 PDF
+
 ## 日历与监看
 
 - 日期来源：每个 Section 里勾了「Deadline」的那个栏位。有时间的显示时间，只有日期的显示成全天

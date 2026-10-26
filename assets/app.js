@@ -27,7 +27,7 @@
   const S = {
     me: null, users: [], sections: [], items: [], comments: [], access: [],
     loaded: false, drawer: null, tpl: null,
-    f: { q: '', who: 'all', view: {}, cal: { who: 'me', section: 'all', view: window.innerWidth < 760 ? 'agenda' : 'month', anchor: '' } },
+    f: { q: '', who: 'all', view: {}, perf: { period: '30', sort: 'open' }, cal: { who: 'me', section: 'all', view: window.innerWidth < 760 ? 'agenda' : 'month', anchor: '' } },
   };
   try { S.f.view = JSON.parse(localStorage.getItem('projecthub_views') || '{}') || {}; } catch (e) { /* storage blocked */ }
 
@@ -301,6 +301,7 @@
     dashboard: '<path d="M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 3v6h8V3z"/>',
     mywork: '<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/>',
     calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+    performance: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
     sections: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M17.5 14v7M14 17.5h7"/>',
     team: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6"/>',
   };
@@ -312,6 +313,7 @@
       <div class="shell">
         <aside class="side">
           <div class="brand"><span class="mark">PH</span><div><b>${esc(CFG.COMPANY_NAME || 'Project Hub')}</b><small>Project Hub</small></div></div>
+          <button type="button" class="gs-btn" data-act="search-open" aria-label="Search all sections"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span class="lbl">Search</span><kbd>Ctrl K</kbd></button>
           <nav class="nav" id="nav"></nav>
           <div class="side-foot">
             <div class="me">${avatar(S.me.id, true)}<div class="who"><b>${esc(S.me.name || S.me.id)}</b><small>${S.me.isSuper ? 'Super admin' : esc(S.me.id)}</small></div></div>
@@ -319,13 +321,123 @@
           </div>
         </aside>
         <main class="main" id="main"></main>
+      </div>
+      <div id="gsearch" class="gsearch" hidden>
+        <div class="scrim" data-act="search-close"></div>
+        <div class="gs-box" role="dialog" aria-modal="true" aria-label="Search all sections">
+          <div class="gs-in"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <input id="gsInput" type="search" placeholder="Search titles, numbers, clients, people, comments…" autocomplete="off" aria-label="Search">
+            <button type="button" class="x" data-act="search-close" aria-label="Close">×</button></div>
+          <div id="gsResults" class="gs-res" role="listbox"></div>
+          <div class="gs-foot">Searches every section you can open, plus items you are named on · ↑ ↓ to move · Enter to open · Esc to close</div>
+        </div>
       </div>`;
+  }
+
+  // ------------------------------------------------------------ global search
+
+  function searchFields(it) {
+    const s = sectionOf(it);
+    const parts = [{ label: 'Title', text: it.title }];
+    s.fields.forEach((f) => {
+      if (f.key === 'title') return;
+      const v = val(it, f);
+      if (blank(v) || v === false) return;
+      let text = '';
+      if (['text', 'longtext', 'url'].includes(f.type)) text = String(v);
+      else if (f.type === 'select') text = (optOf(f, v) || {}).label || '';
+      else if (f.type === 'person') text = userName(v);
+      else if (f.type === 'link') text = (item(v) || {}).title || '';
+      else if (['number', 'currency'].includes(f.type)) text = String(v);
+      if (text) parts.push({ label: f.label, text });
+    });
+    const people = (it.editors || []).concat(it.collaborators || []).map(userName).join(', ');
+    if (people) parts.push({ label: 'People', text: people });
+    S.comments.filter((c) => c.itemId === it.id && c.kind !== 'log').forEach((c) => parts.push({ label: 'Comment by ' + userName(c.author), text: c.text }));
+    return parts;
+  }
+
+  function hl(text, terms) {
+    let out = esc(text);
+    terms.forEach((t) => { if (t) out = out.replace(new RegExp('(' + esc(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); });
+    return out;
+  }
+
+  function runSearch(q) {
+    const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) return { terms, items: [], sections: [] };
+    // One- or two-letter words match the start of a word only ("b" finds "Client B", not every b)
+    const rx = terms.map((t) => (t.length <= 2 ? new RegExp('(^|[^a-z0-9])' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) : null));
+    const has = (text, i) => (rx[i] ? rx[i].test(text) : text.includes(terms[i]));
+    const hasAll = (text) => terms.every((t, i) => has(text, i));
+    const secs = liveSections().filter((s) => hasAll(s.name.toLowerCase()));
+    const items = [];
+    S.items.forEach((it) => {
+      const s = sectionOf(it);
+      if (!s || s.archived) return;
+      const parts = searchFields(it);
+      const all = parts.map((p) => p.text).join(' \n ').toLowerCase();
+      if (!hasAll(all)) return;
+      const titleHit = hasAll(it.title.toLowerCase());
+      const why = titleHit ? null : parts.find((p) => p.label !== 'Title' && terms.some((t, i) => has(p.text.toLowerCase(), i)));
+      items.push({ it, s, titleHit, why });
+    });
+    items.sort((a, b) => (b.titleHit - a.titleHit) || (b.it.updatedAt || '').localeCompare(a.it.updatedAt || ''));
+    return { terms, items: items.slice(0, 60), more: Math.max(0, items.length - 60), sections: secs };
+  }
+
+  function renderSearch() {
+    const q = $('#gsInput').value.trim();
+    const box = $('#gsResults');
+    const r = runSearch(q);
+    S.gs = { list: [] };
+    if (!q) { box.innerHTML = '<div class="gs-empty">Type to search. Try an RFQ number, a client or a person’s name.</div>'; return; }
+    let html = '';
+    r.sections.forEach((s) => {
+      S.gs.list.push({ href: '#s/' + s.id });
+      html += `<button type="button" class="gs-row" role="option" data-act="gs-go" data-i="${S.gs.list.length - 1}">${secMark(s)}<span class="gs-t"><b>${hl(s.name, r.terms)}</b><small>Open section</small></span></button>`;
+    });
+    let lastSec = null;
+    r.items.forEach((x) => {
+      if (x.s.id !== lastSec) { html += `<div class="gs-h">${esc(x.s.name)}</div>`; lastSec = x.s.id; }
+      S.gs.list.push({ id: x.it.id });
+      const so = stageOpt(x.s, x.it);
+      const snippet = x.why ? `${esc(x.why.label)}: ${hl(x.why.text.length > 120 ? x.why.text.slice(0, 120) + '…' : x.why.text, r.terms)}` : esc(x.s.name);
+      html += `<button type="button" class="gs-row" role="option" data-act="gs-go" data-i="${S.gs.list.length - 1}">${secMark(x.s)}
+        <span class="gs-t"><b>${hl(x.it.title, r.terms)}</b><small>${snippet}</small></span>${so ? `<span class="chip c-${so.color}">${esc(so.label)}</span>` : ''}</button>`;
+    });
+    if (r.more) html += `<div class="gs-empty">${r.more} more match. Add another word to narrow it down.</div>`;
+    box.innerHTML = html || `<div class="gs-empty">No matches for “${esc(q)}” in the sections you can open.</div>`;
+    S.gs.sel = 0;
+    markSel();
+  }
+  function markSel() {
+    const rows = document.querySelectorAll('#gsResults .gs-row');
+    rows.forEach((el, i) => { el.classList.toggle('on', i === S.gs.sel); el.setAttribute('aria-selected', i === S.gs.sel); });
+    if (rows[S.gs.sel]) rows[S.gs.sel].scrollIntoView({ block: 'nearest' });
+  }
+  function openSearch() {
+    const g = $('#gsearch');
+    if (!g) return;
+    g.hidden = false;
+    const inp = $('#gsInput');
+    inp.focus();
+    inp.select();
+    renderSearch();
+  }
+  function closeSearch() { const g = $('#gsearch'); if (g) g.hidden = true; }
+  function goSearch(i) {
+    const hit = S.gs && S.gs.list[i];
+    if (!hit) return;
+    closeSearch();
+    if (hit.href) location.hash = hit.href; else openItem(hit.id);
   }
 
   function renderNav(active) {
     const late = S.items.filter((it) => { const s = sectionOf(it); if (!s || !involved(it)) return false; const d = dueInfo(s, it); return d && d.sev === 2; }).length;
     const link = (href, key, label, icon, count) => `<a href="${href}" data-nav="${key}">${icon}<span class="lbl">${label}</span>${count ? `<span class="count">${count}</span>` : ''}</a>`;
-    let html = link('#dashboard', 'dashboard', 'Dashboard', svg('dashboard')) + link('#mywork', 'mywork', 'My Work', svg('mywork'), late) + link('#calendar', 'calendar', 'Calendar', svg('calendar'));
+    let html = link('#dashboard', 'dashboard', 'Dashboard', svg('dashboard')) + link('#mywork', 'mywork', 'My Work', svg('mywork'), late) + link('#calendar', 'calendar', 'Calendar', svg('calendar'))
+      + (canPerf() ? link('#performance', 'performance', 'Team performance', svg('performance')) : '');
     const secs = liveSections();
     if (secs.length) html += '<div class="nav-h">Sections</div>' + secs.map((s) => link('#s/' + s.id, 's/' + s.id, esc(s.name), secMark(s))).join('');
     if (S.me.isSuper) html += '<div class="nav-h">Super admin</div>' + link('#sections', 'sections', 'Manage sections', svg('sections')) + link('#team', 'team', 'Users &amp; access', svg('team'));
@@ -356,6 +468,7 @@
     else if (r.view === 's') { html = viewSection(r.id); nav = 's/' + r.id; title = (section(r.id) || {}).name || 'Section'; }
     else if (r.view === 'mywork' || r.view === 'item') { html = viewMyWork(); nav = 'mywork'; title = 'My Work'; }
     else if (r.view === 'calendar') { html = viewCalendar(); title = 'Calendar'; }
+    else if (r.view === 'performance') { html = viewPerformance(); title = 'Team performance'; }
     else if (r.view === 'sections') { html = viewSections(); title = 'Manage sections'; }
     else if (r.view === 'team') { html = viewTeam(); title = 'Users & access'; }
     else { html = viewDashboard(); nav = 'dashboard'; }
@@ -369,11 +482,10 @@
     if (S._last === location.hash) window.scrollTo(0, keepTop);
     S._last = location.hash;
     document.title = title + ' · Project Hub';
-    // Links from Google Calendar events open the item directly: #item/<id>
-    if (r.view === 'item' && r.id && S._deepLinked !== r.id) {
-      S._deepLinked = r.id;
+    // Shared links and Google Calendar events open the item directly, full screen: #item/<id>
+    if (r.view === 'item' && r.id) {
       history.replaceState(null, '', '#mywork');
-      openItem(r.id);
+      openItem(r.id, true);
     }
   }
 
@@ -506,13 +618,13 @@
 
   // ------------------------------------------------------------ dashboard
 
-  function viewDashboard() {
+  /** What the dashboard shows, shared by the page and its export. */
+  function dashData() {
     const secs = liveSections().filter(hasSectionAccess);
-    const assigned = S.items.filter((it) => { const s = sectionOf(it); return s && !s.archived && involved(it) && !isDone(s, it); });
+    const assigned = S.items.filter((it) => { const s = sectionOf(it); return s && !s.archived && involved(it) && !isDone(s, it); }).sort(byDue);
     const pool = new Map();
     secs.forEach((s) => S.items.filter((it) => it.sectionId === s.id).forEach((it) => pool.set(it.id, it)));
     assigned.forEach((it) => pool.set(it.id, it));
-
     const attention = [];
     pool.forEach((it) => {
       const s = sectionOf(it);
@@ -523,6 +635,22 @@
       if (worst) attention.push({ it, s, info: worst, other: worst === d ? a : d });
     });
     attention.sort((x, y) => y.info.sev - x.info.sev || (involved(y.it) ? 1 : 0) - (involved(x.it) ? 1 : 0));
+    const cards = secs.map((s) => {
+      const its = S.items.filter((it) => it.sectionId === s.id);
+      const open = its.filter((it) => !isDone(s, it));
+      return {
+        s, its, open,
+        late: open.filter((it) => { const d = dueInfo(s, it); return d && d.sev === 2; }).length,
+        stuck: open.filter((it) => ageInfo(s, it)).length,
+        totals: s.fields.filter((f) => f.total).map((f) => ({ f, open: sum(open, (it) => val(it, f)), all: sum(its, (it) => val(it, f)) })),
+      };
+    });
+    return { secs, assigned, attention, cards };
+  }
+  const canExportDash = () => S.me.isSuper || managed().length > 0;
+
+  function viewDashboard() {
+    const { secs, assigned, attention } = dashData();
     const crit = attention.filter((a) => a.info.sev === 2).length;
     const shown = attention.slice(0, 12);
     const hour = new Date().getHours();
@@ -552,7 +680,8 @@
 
     return `
       <div class="head"><div><h1>Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}, ${esc((S.me.name || '').split(' ')[0] || 'there')}</h1>
-        <div class="sub">${fmtDate(today())} · ${secs.length} section${secs.length === 1 ? '' : 's'} shared with you · ${crit} urgent, ${attention.length - crit} to watch</div></div></div>
+        <div class="sub">${fmtDate(today())} · ${secs.length} section${secs.length === 1 ? '' : 's'} shared with you · ${crit} urgent, ${attention.length - crit} to watch</div></div>
+        ${canExportDash() ? '<button class="btn" data-act="dash-export">Export dashboard</button>' : ''}</div>
       ${secs.length ? `<div class="scards">${cards}</div>` : `<div class="empty-state"><b>No section access</b>You can still see the items you are assigned to under My Work.</div>`}
       <div class="grid2">
         <section class="panel">
@@ -565,7 +694,7 @@
         </section>
         <section class="panel">
           <div class="ph"><h2>My open work</h2><a href="#mywork">See all</a></div>
-          ${assigned.length ? `<ul class="alerts">${assigned.slice().sort(byDue).slice(0, 8).map((it) => { const s = sectionOf(it); const d = dueInfo(s, it); return `
+          ${assigned.length ? `<ul class="alerts">${assigned.slice(0, 8).map((it) => { const s = sectionOf(it); const d = dueInfo(s, it); return `
             <li data-act="open" data-id="${esc(it.id)}"><span class="sev ${d && d.sev ? d.cls : 'none'}"></span>
               <div style="min-width:0"><div class="at">${esc(it.title)}</div><div class="am">${esc(s.name)} · ${esc(roleOn(it))}</div></div>${chip(d)}</li>`; }).join('')}</ul>`
           : '<div class="empty">Nothing assigned to you right now.</div>'}
@@ -969,6 +1098,332 @@
     w.document.close();
   }
 
+  // ---- generic multi-table report (team performance, dashboard)
+  // table: { name, heading, cols: [{ label, kind: 'text'|'int'|'money'|'pct'|'date' }], rows: [[raw values]], total?: [raw values] }
+
+  function fmtCell(kind, v) {
+    if (blank(v)) return '';
+    if (kind === 'money') return money(v);
+    if (kind === 'int') return nf.format(v);
+    if (kind === 'pct') return Math.round(v) + '%';
+    if (kind === 'date') return fmtDate(v);
+    return String(v);
+  }
+  function xlCell(kind, v) {
+    if (blank(v)) return '';
+    if (kind === 'pct') return Number(v) / 100;
+    if (kind === 'date') { const d = parseDT(v); return d ? Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 864e5 + 25569 : ''; }
+    return v;
+  }
+
+  async function exportTables(fmt, rep, btn) {
+    const label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Preparing…'; }
+    try {
+      for (const src of LIBS[fmt]) await loadScript(src);
+      if (fmt === 'xlsx') tablesXlsx(rep); else tablesPdf(rep);
+      toast('Report downloaded');
+      return true;
+    } catch (e) {
+      toast(e.message || 'Could not create the report.', true);
+      return false;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = label; }
+    }
+  }
+
+  function tablesXlsx(rep) {
+    const XL = window.XLSX;
+    const wb = XL.utils.book_new();
+    const info = [[rep.title], ['Generated', new Date().toLocaleString('en-MY'), 'by ' + (S.me.name || S.me.id)]].concat(rep.meta.map((m) => [m]));
+    info.push([], ['Contents']);
+    rep.tables.forEach((t) => info.push([t.heading, t.rows.length + ' rows']));
+    const wi = XL.utils.aoa_to_sheet(info);
+    wi['!cols'] = [{ wch: 42 }, { wch: 24 }, { wch: 20 }];
+    XL.utils.book_append_sheet(wb, wi, 'Report');
+    const used = {};
+    rep.tables.forEach((t) => {
+      const data = [t.cols.map((c) => c.label)].concat(t.rows.map((r) => r.map((v, i) => xlCell(t.cols[i].kind, v))));
+      if (t.total) data.push(t.total.map((v, i) => xlCell(t.cols[i].kind, v)));
+      const ws = XL.utils.aoa_to_sheet(data);
+      t.cols.forEach((c, ci) => {
+        const z = { money: '#,##0.00', int: '#,##0', pct: '0%', date: 'd mmm yyyy' }[c.kind];
+        if (!z) return;
+        for (let ri = 1; ri < data.length; ri++) { const ref = XL.utils.encode_cell({ r: ri, c: ci }); if (ws[ref] && ws[ref].v !== '') ws[ref].z = z; }
+      });
+      ws['!cols'] = t.cols.map((c, ci) => ({ wch: Math.min(50, Math.max(10, c.label.length + 2, ...data.slice(1, 200).map((r) => (c.kind === 'date' ? 14 : String(r[ci] || '').length + 2)))) }));
+      if (t.rows.length) ws['!autofilter'] = { ref: XL.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: t.rows.length, c: t.cols.length - 1 } }) };
+      let name = t.name.replace(/[\\/?*[\]:]/g, ' ').slice(0, 28) || 'Sheet';
+      while (used[name]) name = name.slice(0, 26) + ' ' + (used[name] += 1);
+      used[name] = 1;
+      XL.utils.book_append_sheet(wb, ws, name);
+    });
+    XL.writeFile(wb, rep.file + '.xlsx');
+  }
+
+  function tablesPdf(rep) {
+    const bodies = rep.tables.map((t) => t.rows.map((r) => r.map((v, i) => fmtCell(t.cols[i].kind, v))));
+    const allText = [rep.title].concat(rep.meta, ...bodies.flat(), ...rep.tables.map((t) => t.heading)).join(' ');
+    if (/[^\u0000-ɏ -⁯₠-⃏←-⇿✓]/.test(allText)) { printTables(rep, bodies); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const W = doc.internal.pageSize.getWidth();
+    const H = doc.internal.pageSize.getHeight();
+    const ink = [24, 34, 42];
+    const muted = [117, 129, 138];
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(...ink);
+    doc.text(rep.title, 36, 42);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...muted);
+    let y = 58;
+    ['Generated ' + new Date().toLocaleString('en-MY') + ' by ' + (S.me.name || S.me.id)].concat(rep.meta).forEach((line) => {
+      doc.splitTextToSize(line, W - 72).forEach((l) => { doc.text(l, 36, y); y += 12; });
+    });
+    rep.tables.forEach((t, ti) => {
+      if (y > H - 90) { doc.addPage(); y = 42; }
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...ink);
+      doc.text(t.heading + '  (' + t.rows.length + ')', 36, y + 10);
+      doc.setFont('helvetica', 'normal');
+      const align = Object.fromEntries(t.cols.map((c, i) => [i, ['money', 'int', 'pct'].includes(c.kind) ? { halign: 'right' } : {}]));
+      doc.autoTable({
+        head: [t.cols.map((c) => c.label)],
+        body: bodies[ti].length ? bodies[ti] : [[{ content: 'Nothing to show', colSpan: t.cols.length, styles: { textColor: muted } }]],
+        foot: t.total ? [t.total.map((v, i) => fmtCell(t.cols[i].kind, v))] : undefined,
+        startY: y + 16, margin: { left: 36, right: 36, bottom: 36 }, showFoot: 'lastPage',
+        styles: { fontSize: t.cols.length > 10 ? 7 : 8, cellPadding: 3, overflow: 'linebreak', textColor: ink, lineColor: [224, 228, 226], lineWidth: 0.5 },
+        headStyles: { fillColor: [29, 91, 121], textColor: 255, fontStyle: 'bold' },
+        footStyles: { fillColor: [247, 248, 247], textColor: ink, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [250, 251, 250] },
+        columnStyles: align,
+      });
+      y = doc.lastAutoTable.finalY + 22;
+    });
+    const pages = doc.getNumberOfPages();
+    for (let p = 1; p <= pages; p++) {
+      doc.setPage(p); doc.setFontSize(8); doc.setTextColor(...muted);
+      doc.text('Project Hub · ' + rep.title, 36, H - 18);
+      doc.text('Page ' + p + ' of ' + pages, W - 36, H - 18, { align: 'right' });
+    }
+    doc.save(rep.file + '.pdf');
+  }
+
+  function printTables(rep, bodies) {
+    const w = window.open('', '_blank');
+    if (!w) { toast('Allow pop-ups for this site to create the PDF.', true); return; }
+    const r = (k) => (['money', 'int', 'pct'].includes(k) ? ' class="r"' : '');
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(rep.file)}</title>
+      <style>@page{size:A4 landscape;margin:12mm}body{font:10px/1.4 "Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;color:#18222a;margin:0}
+      h1{font-size:18px;margin:0 0 4px}h2{font-size:13px;margin:16px 0 4px}p{margin:0 0 3px;color:#5d6a73}table{border-collapse:collapse;width:100%}
+      th{background:#1d5b79;color:#fff;text-align:left;padding:4px 5px}td{border-bottom:1px solid #e0e4e2;padding:4px 5px;vertical-align:top}
+      .r{text-align:right}tfoot td{font-weight:bold;background:#f7f8f7}thead{display:table-header-group}tr{page-break-inside:avoid}</style></head><body>
+      <h1>${esc(rep.title)}</h1><p>Generated ${esc(new Date().toLocaleString('en-MY'))} by ${esc(S.me.name || S.me.id)}</p>${rep.meta.map((m) => `<p>${esc(m)}</p>`).join('')}
+      ${rep.tables.map((t, ti) => `<h2>${esc(t.heading)} (${t.rows.length})</h2><table><thead><tr>${t.cols.map((c) => `<th${r(c.kind)}>${esc(c.label)}</th>`).join('')}</tr></thead>
+        <tbody>${bodies[ti].map((row) => `<tr>${row.map((v, i) => `<td${r(t.cols[i].kind)}>${esc(v)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${t.cols.length}">Nothing to show</td></tr>`}</tbody>
+        ${t.total ? `<tfoot><tr>${t.total.map((v, i) => `<td${r(t.cols[i].kind)}>${esc(fmtCell(t.cols[i].kind, v))}</td>`).join('')}</tr></tfoot>` : ''}</table>`).join('')}
+      <script>window.onload=function(){window.print();}<\/script></body></html>`);
+    w.document.close();
+  }
+
+  // ---- team workload & performance
+
+  const PERIODS = { 30: 'Last 30 days', month: 'This month', 90: 'Last 90 days', all: 'All time' };
+  const canPerf = () => S.me.isSuper || managed().length > 0;
+
+  function perfData() {
+    const period = S.f.perf.period;
+    const now = new Date();
+    const from = period === 'all' ? null : period === 'month' ? new Date(now.getFullYear(), now.getMonth(), 1) : new Date(Date.now() - Number(period) * 864e5);
+    const inPeriod = (iso) => { const d = parseDT(iso); return d && (!from || d >= from); };
+    const secs = S.me.isSuper ? liveSections() : liveSections().filter((s) => managed().includes(s.id));
+    const secIds = secs.map((s) => s.id);
+    const mon = Core.monitorable(ctx(), S.sections, S.items, S.users);
+    const people = S.users.filter((u) => u.active !== false && (S.me.isSuper || mon[u.id]))
+      .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+    const scoped = S.items.filter((it) => secIds.includes(it.sectionId));
+    const owns = (it, uid) => (it.editors || []).includes(uid) || sectionOf(it).fields.some((f) => f.type === 'person' && val(it, f) === uid);
+    const rows = people.map((u) => {
+      const mine = scoped.filter((it) => owns(it, u.id));
+      const open = mine.filter((it) => !isDone(sectionOf(it), it));
+      const late = open.filter((it) => { const d = dueInfo(sectionOf(it), it); return d && d.sev === 2; });
+      const soon = open.filter((it) => { const s = sectionOf(it); const f = dueF(s); const v = f && val(it, f); const n = v ? daysFromToday(v.slice(0, 10)) : null; return n !== null && n >= 0 && n <= 7; });
+      const waiting = open.filter((it) => ageInfo(sectionOf(it), it));
+      const done = mine.filter((it) => isDone(sectionOf(it), it) && inPeriod(it.stageChangedAt));
+      const withDue = done.filter((it) => { const f = dueF(sectionOf(it)); return f && val(it, f); });
+      const onTime = withDue.filter((it) => {
+        const f = dueF(sectionOf(it));
+        const v = val(it, f);
+        const doneAt = parseDT(it.stageChangedAt);
+        return f.type === 'datetime' ? doneAt <= parseDT(v) : dayStr(doneAt) <= v.slice(0, 10);
+      });
+      const days = done.map((it) => (parseDT(it.stageChangedAt) - parseDT(it.createdAt)) / 864e5).filter((d) => d >= 0);
+      const collab = scoped.filter((it) => (it.collaborators || []).includes(u.id) && !isDone(sectionOf(it), it)).length;
+      return {
+        u, open, late, soon, waiting, done, collab,
+        onTimePct: withDue.length ? (onTime.length / withDue.length) * 100 : null,
+        avgDays: days.length ? days.reduce((a, b) => a + b, 0) / days.length : null,
+        bySec: secs.map((s) => ({ s, n: open.filter((it) => it.sectionId === s.id).length })),
+      };
+    });
+    return { rows, secs, period, scoped };
+  }
+
+  function viewPerformance() {
+    if (!canPerf()) return '<div class="empty-state"><b>Managers and super admins only</b>This page shows workload for the sections you manage.</div>';
+    const { rows, secs } = perfData();
+    const sorted = rows.slice();
+    const key = S.f.perf.sort;
+    const val2 = (r) => ({ name: (r.u.name || r.u.id).toLowerCase(), open: -r.open.length, late: -r.late.length, done: -r.done.length, ontime: -(r.onTimePct === null ? -1 : r.onTimePct) }[key]);
+    sorted.sort((a, b) => (val2(a) < val2(b) ? -1 : val2(a) > val2(b) ? 1 : 0));
+    const maxOpen = Math.max(1, ...rows.map((r) => r.open.length));
+    const tot = (f) => rows.reduce((t, r) => t + f(r), 0);
+    const doneAll = tot((r) => r.done.length);
+    const th = (k, label, cls) => `<th class="${cls || ''}"><button type="button" class="thsort${key === k ? ' on' : ''}" data-act="perf-sort" data-k="${k}">${label}${key === k ? ' ↓' : ''}</button></th>`;
+    const status = (r) => {
+      if (!r.open.length) return '<span class="chip">No open work</span>';
+      const ratio = r.late.length / r.open.length;
+      return ratio > 0.3 ? '<span class="chip crit">Behind</span>' : ratio > 0.1 || r.waiting.length ? '<span class="chip warn">Watch</span>' : '<span class="chip ok">On track</span>';
+    };
+    return `
+      <div class="head"><div><h1>Team performance</h1>
+        <div class="sub">${S.me.isSuper ? 'Everyone, across all sections' : 'People on the sections you manage: ' + esc(secs.map((s) => s.name).join(', '))} · open work counts items where the person is an editor or the named person</div></div>
+        <div class="toolbar">
+          <select data-perf="period" aria-label="Period">${Object.entries(PERIODS).map(([k, l]) => `<option value="${k}"${String(S.f.perf.period) === k ? ' selected' : ''}>${l}</option>`).join('')}</select>
+          <details class="menu"><summary class="btn">Export report</summary><div class="menu-b">
+            <button type="button" data-act="perf-export" data-fmt="xlsx"><b>Excel (.xlsx)</b><small>Summary, per-section workload and late items</small></button>
+            <button type="button" data-act="perf-export" data-fmt="pdf"><b>PDF</b><small>A4 landscape report</small></button></div></details>
+        </div></div>
+      <div class="scards perf-kpis">
+        <div class="panel">${kpi(rows.length, 'People', secs.length + ' section' + (secs.length === 1 ? '' : 's'))}</div>
+        <div class="panel">${kpi(tot((r) => r.open.length), 'Open items', tot((r) => r.soon.length) + ' due in 7 days')}</div>
+        <div class="panel">${kpi(tot((r) => r.late.length), 'Late', 'past their deadline', tot((r) => r.late.length) ? 'crit' : '')}</div>
+        <div class="panel">${kpi(doneAll, 'Completed', PERIODS[S.f.perf.period].toLowerCase())}</div>
+      </div>
+      ${rows.length ? `<div class="tablewrap"><table class="t perf">
+        <thead><tr>${th('name', 'Person')}<th>Status</th>${th('open', 'Open', 'r')}${th('late', 'Late', 'r')}<th class="r">Due ≤ 7 days</th><th class="r">Waiting</th>${th('done', 'Completed', 'r')}${th('ontime', 'On time', 'r')}<th class="r">Avg days to finish</th><th class="r">Collaborating</th><th>Open work by section</th><th></th></tr></thead>
+        <tbody>${sorted.map((r) => `<tr>
+          <td class="nw"><span class="who">${avatar(r.u.id)}<span>${esc(r.u.name || r.u.id)}</span></span></td>
+          <td>${status(r)}</td>
+          <td class="r"><b>${r.open.length}</b></td>
+          <td class="r">${r.late.length ? `<span style="color:var(--crit);font-weight:600">${r.late.length}</span>` : '0'}</td>
+          <td class="r">${r.soon.length}</td><td class="r">${r.waiting.length}</td><td class="r">${r.done.length}</td>
+          <td class="r">${r.onTimePct === null ? '<span class="muted">—</span>' : Math.round(r.onTimePct) + '%'}</td>
+          <td class="r">${r.avgDays === null ? '<span class="muted">—</span>' : r.avgDays.toFixed(1)}</td>
+          <td class="r">${r.collab}</td>
+          <td style="min-width:180px"><div class="segbar" style="width:${Math.max(4, (r.open.length / maxOpen) * 100)}%">${r.bySec.filter((x) => x.n).map((x) => `<i style="flex:${x.n};background:hsl(${hue(x.s.id)} 45% 45%)" title="${esc(x.s.name)}: ${x.n}"></i>`).join('')}</div></td>
+          <td class="nw"><button type="button" class="btn sm" data-act="perf-cal" data-id="${esc(r.u.id)}">Calendar</button></td>
+        </tr>`).join('')}</tbody></table></div>
+        <div class="clegend">${secs.map((s) => `<span><i style="--h:${hue(s.id)}"></i>${esc(s.name)}</span>`).join('')}</div>
+        <p class="muted" style="font-size:12.5px;margin:0">Completed = moved to a done stage in the period. On time = completed on or before its deadline. Status: Behind when more than 30% of open work is late; Watch when some is late or waiting too long in a stage.</p>`
+      : '<div class="empty-state"><b>No people to show</b>Give people access to the sections you manage, or name them on items.</div>'}`;
+  }
+
+  function perfReport() {
+    const { rows, secs, period } = perfData();
+    const late = [];
+    rows.forEach((r) => r.late.forEach((it) => { const s = sectionOf(it); const f = dueF(s); late.push([r.u.name || r.u.id, it.title, s.name, (stageOpt(s, it) || {}).label || '', f ? val(it, f).slice(0, 10) : '', dueInfo(s, it).text]); }));
+    return {
+      title: 'Team performance',
+      meta: ['Scope: ' + (S.me.isSuper ? 'everyone, all sections' : secs.map((s) => s.name).join(', ')), 'Period for completed work: ' + PERIODS[period]],
+      file: 'Team_performance_' + today(),
+      tables: [
+        {
+          name: 'Summary', heading: 'Workload and performance by person',
+          cols: [{ label: 'Person', kind: 'text' }, { label: 'Open', kind: 'int' }, { label: 'Late', kind: 'int' }, { label: 'Due in 7 days', kind: 'int' }, { label: 'Waiting', kind: 'int' }, { label: 'Completed', kind: 'int' }, { label: 'On time', kind: 'pct' }, { label: 'Avg days to finish', kind: 'text' }, { label: 'Collaborating', kind: 'int' }],
+          rows: rows.map((r) => [r.u.name || r.u.id, r.open.length, r.late.length, r.soon.length, r.waiting.length, r.done.length, r.onTimePct === null ? '' : Math.round(r.onTimePct), r.avgDays === null ? '' : r.avgDays.toFixed(1), r.collab]),
+          total: ['Total', ...['open', 'late', 'soon', 'waiting', 'done'].map((k) => rows.reduce((t, r) => t + r[k].length, 0)), '', '', rows.reduce((t, r) => t + r.collab, 0)],
+        },
+        {
+          name: 'By section', heading: 'Open work by section',
+          cols: [{ label: 'Person', kind: 'text' }].concat(secs.map((s) => ({ label: s.name, kind: 'int' }))).concat([{ label: 'Total', kind: 'int' }]),
+          rows: rows.map((r) => [r.u.name || r.u.id].concat(r.bySec.map((x) => x.n)).concat([r.open.length])),
+        },
+        {
+          name: 'Late items', heading: 'Late items by person',
+          cols: [{ label: 'Person', kind: 'text' }, { label: 'Item', kind: 'text' }, { label: 'Section', kind: 'text' }, { label: 'Stage', kind: 'text' }, { label: 'Deadline', kind: 'date' }, { label: 'Alert', kind: 'text' }],
+          rows: late,
+        },
+      ],
+    };
+  }
+
+  // ---- dashboard export (pick the displays to include)
+
+  function dashTables() {
+    const { attention, assigned, cards } = dashData();
+    const t = {
+      sections: {
+        label: 'Section summary', hint: 'Open, late and waiting counts for each section you can open',
+        table: () => ({
+          name: 'Sections', heading: 'Section summary',
+          cols: [{ label: 'Section', kind: 'text' }, { label: 'Your access', kind: 'text' }, { label: 'Open', kind: 'int' }, { label: 'Total', kind: 'int' }, { label: 'Late', kind: 'int' }, { label: 'Waiting', kind: 'int' }, { label: 'Open value', kind: 'text' }],
+          rows: cards.map((c) => [c.s.name, LEVEL_LABEL[myLevel(c.s)], c.open.length, c.its.length, c.late, c.stuck, c.totals.map((x) => x.f.label + ': ' + moneyShortOrNum(x.f, x.open)).join('; ')]),
+        }),
+      },
+      stages: {
+        label: 'Items by stage', hint: 'How many items sit in each stage, per section',
+        table: () => {
+          const rows = [];
+          cards.forEach((c) => { const sf = stageF(c.s); if (sf) sf.options.forEach((o) => { const n = c.its.filter((it) => val(it, sf) === o.value).length; if (n) rows.push([c.s.name, o.label, n]); }); });
+          return { name: 'By stage', heading: 'Items by stage', cols: [{ label: 'Section', kind: 'text' }, { label: 'Stage', kind: 'text' }, { label: 'Items', kind: 'int' }], rows };
+        },
+      },
+      attention: {
+        label: 'Needs attention', hint: 'Everything late or waiting too long, most urgent first',
+        table: () => ({
+          name: 'Needs attention', heading: 'Needs attention',
+          cols: [{ label: 'Item', kind: 'text' }, { label: 'Section', kind: 'text' }, { label: 'Alert', kind: 'text' }, { label: 'Also', kind: 'text' }, { label: 'Editors', kind: 'text' }],
+          rows: attention.map((a) => [a.it.title, a.s.name, a.info.text, a.other ? a.other.text : '', (a.it.editors || []).map(userName).join(', ')]),
+        }),
+      },
+      mywork: {
+        label: 'My open work', hint: 'Items you are an editor, collaborator or named person on',
+        table: () => ({
+          name: 'My open work', heading: 'My open work',
+          cols: [{ label: 'Item', kind: 'text' }, { label: 'Section', kind: 'text' }, { label: 'My role', kind: 'text' }, { label: 'Stage', kind: 'text' }, { label: 'Deadline', kind: 'date' }, { label: 'Alert', kind: 'text' }],
+          rows: assigned.map((it) => { const s = sectionOf(it); const f = dueF(s); const d = dueInfo(s, it); return [it.title, s.name, roleOn(it), (stageOpt(s, it) || {}).label || '', f && val(it, f) ? val(it, f).slice(0, 10) : '', d && d.sev ? d.text : '']; }),
+        }),
+      },
+    };
+    if (canPerf()) t.team = { label: 'Team performance', hint: 'Workload and completion for the people you can monitor', table: () => perfReport().tables[0] };
+    return t;
+  }
+
+  function openDashExport() {
+    const t = dashTables();
+    S.drawer = { kind: 'dash-export' };
+    drawerEl.innerHTML = `
+      <div class="scrim" data-act="close-drawer"></div>
+      <div class="pane" role="dialog" aria-modal="true" aria-labelledby="paneTitle">
+        <div class="pane-h"><div><div class="k">Dashboard</div><h2 id="paneTitle">Export dashboard</h2></div><button type="button" class="x" data-act="close-drawer" aria-label="Close">×</button></div>
+        <div class="pane-b">
+          <form id="dashExportForm" class="form" novalidate>
+            <div class="fld wide"><span>Displays to include</span><div class="tpl-list">
+              ${Object.entries(t).map(([k, x]) => `<label class="tpl"><input type="checkbox" name="part" value="${k}" checked><span><b>${esc(x.label)}</b><small>${esc(x.hint)}</small></span></label>`).join('')}
+            </div></div>
+            <div class="fld wide"><span>Format</span><div class="tpl-list">
+              <label class="tpl"><input type="radio" name="fmt" value="xlsx" checked><span><b>Excel (.xlsx)</b><small>One sheet per display</small></span></label>
+              <label class="tpl"><input type="radio" name="fmt" value="pdf"><span><b>PDF</b><small>A4 landscape, one table per display</small></span></label>
+            </div></div>
+            <div class="form-actions"><button type="submit" class="btn primary" id="saveBtn">Download report</button><button type="button" class="btn" data-act="close-drawer">Cancel</button></div>
+          </form>
+        </div>
+      </div>`;
+    openDrawer('#saveBtn');
+  }
+
+  async function runDashExport(form) {
+    const parts = [...form.querySelectorAll('input[name=part]:checked')].map((x) => x.value);
+    if (!parts.length) { toast('Tick at least one display.', true); return; }
+    const fmt = form.querySelector('input[name=fmt]:checked').value;
+    const t = dashTables();
+    const rep = {
+      title: 'Dashboard report',
+      meta: ['Prepared for ' + (S.me.name || S.me.id) + ' · shows only the sections and items this account can open'],
+      file: 'Dashboard_' + today(),
+      tables: parts.map((k) => t[k].table()),
+    };
+    if (await exportTables(fmt, rep, $('#saveBtn'))) closeDrawer();
+  }
+
   function refreshSection(panelToo) {
     const body = $('#secBody');
     if (!body) return;
@@ -1286,11 +1741,29 @@
       </details>${hint ? `<small class="muted">${hint}</small>` : ''}</div>`;
   }
 
-  function openItem(id) {
+  function openItem(id, full) {
     const it = item(id);
-    if (!it) { toast('This item no longer exists, or you no longer have access.', true); return; }
-    S.drawer = { kind: 'item', id: it.id, sectionId: it.sectionId, armed: false, busy: false };
+    if (!it) { toast('You cannot open this item. It was deleted, or you do not have access — ask a section manager or one of its editors to add you.', true); return; }
+    let remembered = false;
+    try { remembered = localStorage.getItem('projecthub_full') === '1'; } catch (e) { /* storage blocked */ }
+    S.drawer = { kind: 'item', id: it.id, sectionId: it.sectionId, armed: false, busy: false, full: full || remembered };
     renderItemDrawer(it);
+  }
+  const itemLink = (id) => location.origin + location.pathname + '#item/' + encodeURIComponent(id);
+
+  async function copyLink(id, btn) {
+    const url = itemLink(id);
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch (e) {
+      // Clipboard blocked: show the link selected so it can be copied by hand
+      const box = $('#shareBox');
+      if (box) { box.hidden = false; const inp = box.querySelector('input'); inp.value = url; inp.select(); }
+      toast('Press Ctrl + C to copy the selected link.');
+      return;
+    }
+    if (btn) { btn.textContent = 'Link copied ✓'; setTimeout(() => { if (btn.isConnected) btn.textContent = 'Copy link'; }, 2000); }
+    toast('Link copied. Only people with access to this item can open it.');
   }
   function newItem(sectionId, preset) {
     const s = section(sectionId);
@@ -1315,8 +1788,14 @@
       <div class="pane" role="dialog" aria-modal="true" aria-labelledby="paneTitle">
         <div class="pane-h"><div style="min-width:0"><div class="k">${esc(s.name)}</div><h2 id="paneTitle">${isNew ? 'New item' : esc(it.title)}</h2>
           ${!isNew ? `<div class="muted" style="font-size:12px">Updated ${ago(it.updatedAt)}${roleOn(it) ? ' · you are ' + esc(roleOn(it).toLowerCase()) : ''}</div>` : ''}</div>
-          <button type="button" class="x" data-act="close-drawer" aria-label="Close">×</button></div>
+          <div class="pane-tools">
+            ${!isNew ? `<button type="button" class="btn sm" data-act="copy-link" title="Copy a link to this item. Only people with access can open it.">Copy link</button>` : ''}
+            <button type="button" class="btn sm" data-act="full-toggle" title="${S.drawer.full ? 'Back to side panel' : 'Open full screen'}">${S.drawer.full ? '⤡ Exit full screen' : '⤢ Full screen'}</button>
+            <button type="button" class="x" data-act="close-drawer" aria-label="Close">×</button>
+          </div></div>
+        ${!isNew ? `<div class="sharebox" id="shareBox" hidden><input type="text" readonly aria-label="Link to this item"><span>Only people with access to ${esc(s.name)}, or named on this item, can open it.</span></div>` : ''}
         <div class="pane-b">
+          <div class="pb-main">
           <form class="form" id="itemForm" novalidate>
             ${fields.map((f) => `<label class="fld${f.type === 'longtext' || f.key === 'title' ? ' wide' : ''}${f.type === 'checkbox' ? ' chk' : ''}">${f.type === 'checkbox' ? inputFor(s, f, val(it, f), ro) + `<span>${esc(f.label)}</span>` : `<span>${esc(f.label)}${f.required ? ' *' : ''}</span>${inputFor(s, f, val(it, f), ro)}`}</label>`).join('')}
             ${picker('editors', 'Editors', it.editors || [], ro, 'Editors can change this item, even without access to the whole section.')}
@@ -1327,6 +1806,8 @@
               ${!isNew && can.deleteItem(ctx(), it, s) ? `<button type="button" class="btn danger${S.drawer.armed ? ' armed' : ''}" data-act="item-delete">${S.drawer.armed ? 'Click again to delete' : 'Delete'}</button>` : ''}
             </div>
           </form>
+          </div>
+          <div class="pb-side">
           ${related.map((r) => `<section class="sec"><h3>${esc(r.s2.name)} <span class="muted" style="text-transform:none;letter-spacing:0">${r.items.length}${r.s2.fields.filter((f) => f.total).map((f) => ' · ' + esc(f.label) + ' ' + moneyShortOrNum(f, sum(r.items, (x) => val(x, f)))).join('')}</span>
               ${can.create(ctx(), r.s2) ? `<button type="button" class="btn sm" data-act="new-linked" data-section="${esc(r.s2.id)}" data-field="${esc(r.f.key)}" data-target="${esc(it.id)}">+ Add</button>` : ''}</h3>
             ${r.items.length ? `<ul class="rel">${r.items.sort(byDue).map((x) => `<li data-act="open" data-id="${esc(x.id)}"><span>${esc(x.title)}</span>${stageOpt(r.s2, x) ? `<span class="chip c-${stageOpt(r.s2, x).color}">${esc(stageOpt(r.s2, x).label)}</span>` : ''}${chip(dueInfo(r.s2, x))}</li>`).join('')}</ul>` : '<div class="muted">None you can see.</div>'}
@@ -1344,9 +1825,20 @@
                 : '<div class="muted">No comments yet.</div>'}</div>
               ${commentable ? '<div class="composer"><textarea id="commentText" placeholder="Write an update or ask a question…" aria-label="Comment"></textarea><button type="button" class="btn sm" data-act="add-comment">Post comment</button></div>' : ''}
             </section>` : ''}
+          </div>
         </div>
       </div>`;
+    drawerEl.classList.toggle('full', !!S.drawer.full);
     openDrawer(isNew ? '#itemForm input:not([disabled])' : '.x');
+  }
+
+  /** Switch the open item between side panel and full screen; only styling changes, so typed input stays. */
+  function toggleFull(btn) {
+    S.drawer.full = !S.drawer.full;
+    drawerEl.classList.toggle('full', S.drawer.full);
+    btn.textContent = S.drawer.full ? '⤡ Exit full screen' : '⤢ Full screen';
+    btn.title = S.drawer.full ? 'Back to side panel' : 'Open full screen';
+    try { localStorage.setItem('projecthub_full', S.drawer.full ? '1' : ''); } catch (e) { /* storage blocked */ }
   }
 
   function openDrawer(focusSel) {
@@ -1357,6 +1849,7 @@
   }
   function closeDrawer() {
     S.drawer = null;
+    drawerEl.classList.remove('full');
     drawerEl.hidden = true;
     drawerEl.innerHTML = '';
     document.body.style.overflow = '';
@@ -1655,6 +2148,18 @@
       case 'file-open': openFile(d.file); break;
       case 'view': S.f.view[d.section] = d.v; saveViews(); render(); break;
       case 'export': exportReport(section(d.section), d.fmt, el); break;
+      case 'copy-link': copyLink(S.drawer.id, el); break;
+      case 'dash-export': openDashExport(); break;
+      case 'perf-sort': S.f.perf.sort = d.k; render(); break;
+      case 'perf-cal': S.f.cal.who = d.id; location.hash = '#calendar'; break;
+      case 'perf-export': {
+        exportTables(d.fmt, perfReport(), el.querySelector('b')).then(() => { const m = el.closest('details'); if (m) m.open = false; });
+        break;
+      }
+      case 'search-open': openSearch(); break;
+      case 'search-close': closeSearch(); break;
+      case 'gs-go': goSearch(Number(d.i)); break;
+      case 'full-toggle': toggleFull(el); break;
       // calendar
       case 'cal-view': S.f.cal.view = d.v; render(); break;
       case 'cal-day': S.f.cal.anchor = d.day; S.f.cal.view = 'week'; render(); break;
@@ -1781,6 +2286,18 @@
   });
 
   document.addEventListener('keydown', (e) => {
+    const g = $('#gsearch');
+    const searching = g && !g.hidden;
+    if (searching) {
+      const n = (S.gs && S.gs.list.length) || 0;
+      if (e.key === 'Escape') { e.preventDefault(); closeSearch(); return; }
+      if (e.key === 'ArrowDown' && n) { e.preventDefault(); S.gs.sel = (S.gs.sel + 1) % n; markSel(); return; }
+      if (e.key === 'ArrowUp' && n) { e.preventDefault(); S.gs.sel = (S.gs.sel - 1 + n) % n; markSel(); return; }
+      if (e.key === 'Enter' && e.target.id === 'gsInput') { e.preventDefault(); goSearch(S.gs ? S.gs.sel : 0); return; }
+      return;
+    }
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
+    if (S.loaded && ((e.key === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !typing))) { e.preventDefault(); openSearch(); return; }
     if (e.key === 'Escape' && S.drawer) closeDrawer();
     if (e.key === 'Enter' && e.target.matches('.card[data-act="open"]')) openItem(e.target.dataset.id);
   });
@@ -1788,11 +2305,12 @@
   document.addEventListener('submit', (e) => {
     // getAttribute, not .id: a field named "id" or "email" would shadow the form's own properties
     const id = e.target.getAttribute('id');
-    if (!['itemForm', 'userForm', 'sectionForm'].includes(id)) return;
+    if (!['itemForm', 'userForm', 'sectionForm', 'dashExportForm'].includes(id)) return;
     e.preventDefault();
     if (id === 'itemForm') saveItem(e.target);
     if (id === 'userForm') saveUser(e.target);
     if (id === 'sectionForm') createSection(e.target);
+    if (id === 'dashExportForm') runDashExport(e.target);
   });
 
   function tplInput(t) {
@@ -1831,6 +2349,11 @@
       const [sid, uid2] = t.dataset.access.split('|');
       t.className = 'lvl lvl-' + t.value;
       setAccess(sid, uid2, t.value).catch((err) => { handleError(err); render(); });
+      return;
+    }
+    if (t.dataset.perf) {
+      S.f.perf[t.dataset.perf] = t.value;
+      render();
       return;
     }
     if (t.dataset.cal) {
@@ -1879,6 +2402,7 @@
       t.closest('.pick-b').querySelectorAll('.prow').forEach((r) => { r.hidden = q && !r.textContent.toLowerCase().includes(q); });
       return;
     }
+    if (t.id === 'gsInput') { renderSearch(); return; }
     if (t.dataset.fr !== undefined && t.dataset.p === 'value' && t.tagName === 'INPUT' && t.type !== 'date') {
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => {
