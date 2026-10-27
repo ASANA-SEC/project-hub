@@ -229,6 +229,35 @@ BLOCKS = [
         'Start from **Blank** or a template (RFQ & Tender, Projects, Project Tasks, Payment & Claims).',
         'Click **Create section**, adjust its columns, then give people access under Users & access.',
     ]),
+    ('h2', 'Archiving, backing up and restoring a section'),
+    ('p', 'Super admins can save any section as one archive file, keep it outside Project Hub, and bring it back later. '
+          'The file holds the section’s columns and stages, every item, comments and activity, editors and collaborators, people’s access, and the list of attachments.'),
+    ('bullets', [
+        '**Back up** downloads the archive file. The section stays as it is.',
+        '**Archive** downloads the file and then removes the section for everyone. Its data also stays in the Google Sheet, and **Restore** in the Removed list brings it back.',
+        '**Restore from archive** uploads a file and creates a new section from it. Existing sections are never changed.',
+    ]),
+    ('img', '21_archive', 'Archive a section: optional password, and a tick to confirm removal.'),
+    ('steps', [
+        'Open **Manage sections** and click **Back up** or **Archive** next to the section.',
+        'Optionally set a password. The file is then encrypted (AES-256) and cannot be opened or restored without it.',
+        'For Archive, tick the confirmation box. Click **Download backup** or **Download and archive**.',
+        'Keep the .html file somewhere safe, such as a company Google Drive folder.',
+    ]),
+    ('warn', 'A lost password cannot be recovered. Keep it with the file’s owner or in the company password manager.'),
+    ('h2', 'Opening an archive file outside Project Hub'),
+    ('img', '23_archive_viewer', 'An archive file opened in a browser: search, filter by stage, click a row for full details.'),
+    ('p', 'Double-click the archive file. It opens in any browser, offline and without signing in, read only. Enter the password if it has one. '
+          'Search, filter by stage and click any row to see every field, the people, attachments and the full comment history. **Download CSV** gives a spreadsheet; **Print** prints the list.'),
+    ('h2', 'Restoring an archive'),
+    ('img', '22_restore', 'Restore from archive: choose the file, check what is in it, name the new section.'),
+    ('steps', [
+        'Open **Manage sections** and click **Restore from archive**.',
+        'Choose the archive file, and enter its password if it has one.',
+        'Check the summary and the name. If the name is already used, “(restored)” is added; you can change it.',
+        'Leave **Give back people’s access** ticked to restore everyone’s access level, then click **Restore section**.',
+    ]),
+    ('tip', 'Editors and collaborators whose accounts were deleted are left off. Attachments point to the same Google Drive files as before.'),
     ('h2', 'Google Calendar'),
     ('p', 'Items with a deadline become events in the “Project Hub” calendar of the account that runs the backend, with the item’s editors, collaborators and named people as guests. After many changes at once, open **Calendar** and click **Re-sync Google Calendar**.'),
 

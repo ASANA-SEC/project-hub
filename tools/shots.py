@@ -118,6 +118,36 @@ def main():
         page.click('[data-act=sec-new]')
         page.fill('#sectionForm [name=name]', 'Procurement')
         shot(page, '20_new_section')
+        page.click('.pane-h .x')
+
+        # Archive, back up, restore
+        page.click('[data-act=arc-open][data-mode=archive][data-id=s_tasks]')
+        page.fill('#archiveForm [name=pw]', 'example-password')
+        page.fill('#archiveForm [name=pw2]', 'example-password')
+        page.check('#archiveForm [name=confirm]')
+        shot(page, '21_archive')
+        page.click('.pane-h .x')
+        page.click('[data-act=arc-open][data-mode=backup][data-id=s_tasks]')
+        with page.expect_download() as dl:
+            page.click('#saveBtn')
+        tmp = OUT.parent / '_tasks_backup.html'
+        dl.value.save_as(tmp)
+        page.wait_for_timeout(300)
+
+        page.click('[data-act=arc-restore]')
+        page.set_input_files('#arcFile', str(tmp))
+        page.wait_for_selector('#restoreForm [name=name]')
+        shot(page, '22_restore')
+        page.click('.pane-h .x')
+
+        viewer = ctx.new_page()
+        viewer.goto(tmp.as_uri())
+        viewer.wait_for_selector('table')
+        viewer.click('tbody tr >> nth=2')
+        viewer.wait_for_timeout(300)
+        viewer.screenshot(path=str(OUT / '23_archive_viewer.png'))
+        print('saved 23_archive_viewer')
+        tmp.unlink()
 
         browser.close()
 

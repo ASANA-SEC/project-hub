@@ -1571,14 +1571,193 @@
       <td class="r">${S.items.filter((it) => it.sectionId === s.id).length}</td><td class="r">${s.fields.length}</td>
       <td class="nw">${stageF(s) ? esc(stageF(s).label) : '<span class="muted">Table only</span>'}</td>
       <td class="r">${S.access.filter((a) => a.sectionId === s.id).length}</td>
-      <td class="nw r">${s.archived ? `<button class="btn sm" data-act="sec-restore" data-id="${esc(s.id)}">Restore</button>`
-        : `<a class="btn sm" href="#s/${esc(s.id)}/customize">Customize</a> <button class="btn sm danger${S._armSec === s.id ? ' armed' : ''}" data-act="sec-archive" data-id="${esc(s.id)}">${S._armSec === s.id ? 'Click again to remove' : 'Remove'}</button>`}</td></tr>`;
+      <td class="nw r">${s.archived ? `<button class="btn sm" data-act="arc-open" data-mode="backup" data-id="${esc(s.id)}">Back up</button> <button class="btn sm" data-act="sec-restore" data-id="${esc(s.id)}">Restore</button>`
+        : `<a class="btn sm" href="#s/${esc(s.id)}/customize">Customize</a> <button class="btn sm" data-act="arc-open" data-mode="backup" data-id="${esc(s.id)}">Back up</button> <button class="btn sm" data-act="arc-open" data-mode="archive" data-id="${esc(s.id)}">Archive</button> <button class="btn sm danger${S._armSec === s.id ? ' armed' : ''}" data-act="sec-archive" data-id="${esc(s.id)}">${S._armSec === s.id ? 'Click again to remove' : 'Remove'}</button>`}</td></tr>`;
     return `
-      <div class="head"><div><h1>Manage sections</h1><div class="sub">Add, rename, reorder or remove sections. Removing hides a section from everyone; its data stays in the Google Sheet and you can restore it.</div></div>
-        <button class="btn primary" data-act="sec-new">+ New section</button></div>
+      <div class="head"><div><h1>Manage sections</h1><div class="sub">Add, rename, reorder or remove sections. <b>Back up</b> downloads a section as one archive file you can open in any browser; <b>Archive</b> does the same and then removes the section. <b>Restore from archive</b> brings a file back as a new section.</div></div>
+        <div class="toolbar"><button class="btn" data-act="arc-restore">Restore from archive</button><button class="btn primary" data-act="sec-new">+ New section</button></div></div>
       ${live.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Order</th><th>Section</th><th class="r">Items</th><th class="r">Columns</th><th>Board by</th><th class="r">Users</th><th></th></tr></thead><tbody>${live.map(row).join('')}</tbody></table></div>`
         : `<div class="empty-state"><b>No sections yet</b><button class="btn primary" data-act="seed-sections" style="margin-top:10px">Create the standard sections</button></div>`}
       ${gone.length ? `<div class="group"><h2>Removed</h2><div class="tablewrap"><table class="t"><tbody>${gone.map(row).join('')}</tbody></table></div></div>` : ''}`;
+  }
+
+  // ------------------------------------------------------------ super admin: archive, back up, restore
+
+  function archivePayload(s) {
+    const items = S.items.filter((it) => it.sectionId === s.id);
+    const ids = new Set(items.map((i) => i.id));
+    const comments = S.comments.filter((c) => ids.has(c.itemId));
+    const linked = {};
+    const used = new Set();
+    items.forEach((it) => {
+      [it.createdBy].concat(it.editors || [], it.collaborators || [], (it.files || []).map((f) => f.uploadedBy)).forEach((u) => used.add(u));
+      s.fields.forEach((f) => {
+        const v = val(it, f);
+        if (f.type === 'person' && v) used.add(v);
+        if (f.type === 'link' && v && !ids.has(v) && item(v)) linked[v] = { title: item(v).title };
+      });
+    });
+    comments.forEach((c) => used.add(c.author));
+    const access = S.access.filter((a) => a.sectionId === s.id).map((a) => ({ userId: a.userId, level: a.level }));
+    access.forEach((a) => used.add(a.userId));
+    return {
+      app: 'Project Hub', appUrl: location.origin + location.pathname,
+      exportedAt: new Date().toISOString(), exportedBy: S.me.id, exportedByName: S.me.name || S.me.id,
+      section: { id: s.id, name: s.name, template: s.template || '', fields: s.fields, stageField: s.stageField || '' },
+      items, comments, access, linked,
+      users: S.users.filter((u) => used.has(u.id)).map((u) => ({ id: u.id, name: u.name })),
+    };
+  }
+
+  function openArchiveExport(id, mode) {
+    const s = section(id);
+    if (!s || !S.me.isSuper) return;
+    const items = S.items.filter((it) => it.sectionId === s.id);
+    const files = items.reduce((t, it) => t + (it.files || []).length, 0);
+    const comments = S.comments.filter((c) => items.some((it) => it.id === c.itemId)).length;
+    const archive = mode === 'archive';
+    S.drawer = { kind: 'archive', id, mode };
+    drawerEl.innerHTML = `
+      <div class="scrim" data-act="close-drawer"></div>
+      <div class="pane" role="dialog" aria-modal="true" aria-labelledby="paneTitle">
+        <div class="pane-h"><div><div class="k">Manage sections</div><h2 id="paneTitle">${archive ? 'Archive' : 'Back up'} ${esc(s.name)}</h2></div><button type="button" class="x" data-act="close-drawer" aria-label="Close">×</button></div>
+        <div class="pane-b">
+          <form id="archiveForm" class="form" novalidate>
+            <div class="fld wide"><span>What goes into the file</span>
+              <div class="arc-sum"><span><b>${items.length}</b> items</span><span><b>${comments}</b> comments and activity entries</span><span><b>${s.fields.length}</b> columns and stages</span><span><b>${S.access.filter((a) => a.sectionId === s.id).length}</b> people’s access</span><span><b>${files}</b> attachment records</span></div>
+              <small class="muted">Attachments are listed with their names; the files themselves stay in the company Google Drive.</small></div>
+            <div class="banner info wide"><span>You get one <b>.html</b> file. Double-click it to view the section in any browser, offline, without signing in. To bring it back, use <b>Restore from archive</b>.</span></div>
+            <label class="fld"><span>Password (optional)</span><input type="password" name="pw" autocomplete="new-password" placeholder="Leave empty for no password"></label>
+            <label class="fld"><span>Repeat password</span><input type="password" name="pw2" autocomplete="new-password"></label>
+            <small class="muted wide">With a password the file is encrypted (AES-256). Nobody can open or restore it without the password, and a lost password cannot be recovered.</small>
+            ${archive ? `<label class="fld chk wide"><input type="checkbox" name="confirm"><span>After the file downloads, remove <b>${esc(s.name)}</b> from the platform for everyone. Its data stays in the Google Sheet.</span></label>` : ''}
+            <div class="form-actions"><button type="submit" class="btn primary" id="saveBtn">${archive ? 'Download and archive' : 'Download backup'}</button><button type="button" class="btn" data-act="close-drawer">Cancel</button></div>
+          </form>
+        </div>
+      </div>`;
+    openDrawer('input[name=pw]');
+  }
+
+  async function runArchiveExport(form) {
+    const { id, mode } = S.drawer;
+    const s = section(id);
+    const pw = form.elements.pw.value;
+    if (pw !== form.elements.pw2.value) { toast('The two passwords do not match.', true); return; }
+    if (pw && pw.length < 6) { toast('Use a password of at least 6 characters.', true); return; }
+    if (mode === 'archive' && !form.elements.confirm.checked) { toast('Tick the box to confirm the section should be removed after download.', true); return; }
+    const btn = $('#saveBtn');
+    btn.disabled = true;
+    btn.textContent = 'Preparing…';
+    try {
+      const html = await window.Archive.build(archivePayload(s), pw);
+      const name = 'ProjectHub_' + (s.name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'Section') + '_' + (mode === 'archive' ? 'archive' : 'backup') + '_' + today() + '.html';
+      const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      if (mode === 'archive' && !s.archived) {
+        const res = await API.call('section.update', { id: s.id, patch: { archived: true } });
+        replaceSection(res.section);
+        toast('Archive file downloaded and ' + s.name + ' removed. Restore it any time.');
+      } else {
+        toast('Backup downloaded: ' + name);
+      }
+      closeDrawer();
+      render();
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = mode === 'archive' ? 'Download and archive' : 'Download backup';
+      handleError(e);
+    }
+  }
+
+  function openArchiveRestore() {
+    if (!S.me.isSuper) return;
+    S.drawer = { kind: 'restore', box: null, payload: null };
+    renderRestore();
+  }
+
+  function renderRestore(message) {
+    const d = S.drawer;
+    const p = d.payload;
+    const taken = p && S.sections.some((s) => s.name.toLowerCase() === p.section.name.toLowerCase());
+    const people = p ? p.access.filter((a) => S.users.some((u) => u.id === a.userId) && !Core.isSuperId(a.userId)) : [];
+    drawerEl.innerHTML = `
+      <div class="scrim" data-act="close-drawer"></div>
+      <div class="pane" role="dialog" aria-modal="true" aria-labelledby="paneTitle">
+        <div class="pane-h"><div><div class="k">Manage sections</div><h2 id="paneTitle">Restore from archive</h2></div><button type="button" class="x" data-act="close-drawer" aria-label="Close">×</button></div>
+        <div class="pane-b">
+          <form id="restoreForm" class="form" novalidate>
+            <label class="fld wide"><span>Archive file (.html)</span><input type="file" id="arcFile" accept=".html,text/html"></label>
+            ${message ? `<div class="banner wide"><span>${esc(message)}</span></div>` : ''}
+            ${d.box && d.box.encrypted && !p ? `
+              <div class="banner info wide"><span><b>${esc(d.box.meta.section)}</b> · ${esc(d.box.meta.items)} items · exported ${esc(fmtDate(d.box.meta.exportedAt))} by ${esc(d.box.meta.exportedBy)}. This file is password protected.</span></div>
+              <label class="fld wide"><span>Password</span><input type="password" name="pw" autocomplete="current-password"></label>
+              <div class="form-actions"><button type="button" class="btn primary" data-act="arc-unlock">Unlock</button></div>` : ''}
+            ${p ? `
+              <div class="fld wide"><span>In this archive</span><div class="arc-sum"><span><b>${p.items.length}</b> items</span><span><b>${p.comments.length}</b> comments and activity</span><span><b>${p.section.fields.length}</b> columns</span><span>exported ${esc(fmtDate(p.exportedAt))} by ${esc(p.exportedByName)}</span></div></div>
+              <label class="fld wide"><span>Restore as a new section named</span><input type="text" name="name" value="${esc(taken ? p.section.name + ' (restored)' : p.section.name)}"></label>
+              ${taken ? '<small class="muted wide">A section with this name already exists. Nothing in it will change; the archive comes back as a separate section.</small>' : ''}
+              <label class="fld chk wide"><input type="checkbox" name="withAccess"${people.length ? ' checked' : ' disabled'}><span>Give back people’s access (${people.length} ${people.length === 1 ? 'person' : 'people'} who still have accounts)</span></label>
+              <small class="muted wide">Editors and collaborators who no longer have an account are left off. Attachments point to the same Google Drive files as before.</small>
+              <div class="form-actions"><button type="submit" class="btn primary" id="saveBtn">Restore section</button><button type="button" class="btn" data-act="close-drawer">Cancel</button></div>` : ''}
+          </form>
+        </div>
+      </div>`;
+    openDrawer(p ? 'input[name=name]' : d.box && d.box.encrypted ? 'input[name=pw]' : '#arcFile');
+  }
+
+  async function readArchiveFile(file) {
+    try {
+      const box = window.Archive.read(await file.text());
+      S.drawer.box = box;
+      S.drawer.payload = box.encrypted ? null : box.payload;
+      renderRestore();
+    } catch (e) {
+      S.drawer.box = null;
+      S.drawer.payload = null;
+      renderRestore(e.message);
+    }
+  }
+
+  async function unlockArchive() {
+    const pw = (drawerEl.querySelector('input[name=pw]') || {}).value || '';
+    try {
+      S.drawer.payload = await window.Archive.open(S.drawer.box, pw);
+      renderRestore();
+    } catch (e) {
+      renderRestore(e.message);
+    }
+  }
+
+  async function runRestore(form) {
+    const p = S.drawer.payload;
+    const name = form.elements.name.value.trim();
+    if (!name) { toast('Give the section a name.', true); return; }
+    const btn = $('#saveBtn');
+    btn.disabled = true;
+    btn.textContent = 'Restoring ' + p.items.length + ' items…';
+    try {
+      const res = await API.call('section.restore', {
+        name, section: p.section, items: p.items, comments: p.comments, access: p.access, withAccess: form.elements.withAccess.checked,
+      });
+      replaceSection(res.section);
+      S.items = S.items.concat(res.items);
+      S.comments = S.comments.concat(res.comments);
+      S.access = S.access.concat(res.access);
+      closeDrawer();
+      toast(name + ' restored with ' + res.items.length + ' items');
+      location.hash = '#s/' + res.section.id;
+      render();
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Restore section';
+      handleError(e);
+    }
   }
 
   // ------------------------------------------------------------ super admin: users & access
@@ -2150,6 +2329,9 @@
       case 'export': exportReport(section(d.section), d.fmt, el); break;
       case 'copy-link': copyLink(S.drawer.id, el); break;
       case 'dash-export': openDashExport(); break;
+      case 'arc-open': openArchiveExport(d.id, d.mode); break;
+      case 'arc-restore': openArchiveRestore(); break;
+      case 'arc-unlock': unlockArchive(); break;
       case 'perf-sort': S.f.perf.sort = d.k; render(); break;
       case 'perf-cal': S.f.cal.who = d.id; location.hash = '#calendar'; break;
       case 'perf-export': {
@@ -2306,8 +2488,10 @@
   document.addEventListener('submit', (e) => {
     // getAttribute, not .id: a field named "id" or "email" would shadow the form's own properties
     const id = e.target.getAttribute('id');
-    if (!['itemForm', 'userForm', 'sectionForm', 'dashExportForm'].includes(id)) return;
+    if (!['itemForm', 'userForm', 'sectionForm', 'dashExportForm', 'archiveForm', 'restoreForm'].includes(id)) return;
     e.preventDefault();
+    if (id === 'archiveForm') runArchiveExport(e.target);
+    if (id === 'restoreForm') { if (S.drawer.payload) runRestore(e.target); else if (S.drawer.box) unlockArchive(); }
     if (id === 'itemForm') saveItem(e.target);
     if (id === 'userForm') saveUser(e.target);
     if (id === 'sectionForm') createSection(e.target);
@@ -2346,6 +2530,7 @@
   document.addEventListener('change', (e) => {
     const t = e.target;
     if (t.id === 'fileInput' && t.files && t.files[0]) { uploadFile(t.files[0]); return; }
+    if (t.id === 'arcFile' && t.files && t.files[0]) { readArchiveFile(t.files[0]); return; }
     if (t.dataset.access) {
       const [sid, uid2] = t.dataset.access.split('|');
       t.className = 'lvl lvl-' + t.value;

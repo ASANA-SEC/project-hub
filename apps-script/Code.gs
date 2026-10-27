@@ -136,6 +136,7 @@ function afterChange_(store, action, result) {
   if (action === 'item.create' || action === 'item.update') syncItem_(store, result.item);
   else if (action === 'item.remove') dropEvent_(store, result.id);
   else if (action === 'section.update') resyncCalendar_(store, result.section.id, 90 * 1000);
+  else if (action === 'section.restore') resyncCalendar_(store, result.section.id, 120 * 1000);
 }
 
 /** Create, update or remove the Google Calendar event for one item. */
@@ -264,6 +265,13 @@ function sheetStore_() {
     all: function (t) { return rows(t).map(function (x) { return copy(x.rec); }); },
     insert: function (t, rec) {
       sheet_(t).appendRow(toRow_(t, rec));
+      delete cache[t];
+    },
+    insertMany: function (t, recs) {
+      // One write for many rows (used when restoring an archive)
+      const sh = sheet_(t);
+      const rows = recs.map(function (r) { return toRow_(t, r); });
+      sh.getRange(sh.getLastRow() + 1, 1, rows.length, TABLES[t].length).setValues(rows);
       delete cache[t];
     },
     save: function (t, rec) {

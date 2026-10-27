@@ -369,6 +369,66 @@ var Core = (function () {
         return { section: c7 };
       }
 
+      case 'section.restore': {
+        // Bring a section back from an archive file as a NEW section. Never touches existing data.
+        needSuper();
+        var src = p.section || {};
+        var oldId = String(src.id || '');
+        var rIds = sections.map(function (s) { return s.id; });
+        var newId = store.uid();
+        var rFields = cleanFields((src.fields || []).map(function (f) {
+          var c = clone(f);
+          if (c.type === 'link' && c.target === oldId) c.target = newId; // links inside the archived section
+          return c;
+        }), rIds.concat([newId]));
+        var rName = String(p.name || src.name || '').trim().slice(0, 60);
+        if (!rName) throw fail('BAD_REQUEST', 'Give the section a name.');
+        var rSec = {
+          id: newId, name: rName, template: slug(src.template),
+          order: sections.reduce(function (m, s) { return Math.max(m, Number(s.order) || 0); }, 0) + 1,
+          fields: rFields, stageField: cleanStageField(rFields, src.stageField), archived: false,
+          createdBy: me.id, createdAt: now, updatedAt: now,
+        };
+        var srcItems = arr(p.items).slice(0, 5000);
+        var idMap = {};
+        srcItems.forEach(function (it) { idMap[String(it.id)] = store.uid(); });
+        var selfLinks = rFields.filter(function (f) { return f.type === 'link' && f.target === newId; }).map(function (f) { return f.key; });
+        var newItems = srcItems.map(function (it) {
+          var data = cleanData(rSec, it.data || {}, userIds);
+          selfLinks.forEach(function (k) { if (data[k]) data[k] = idMap[data[k]] || ''; });
+          var eds = people(it.editors, userIds);
+          return {
+            id: idMap[String(it.id)], sectionId: newId, title: String(it.title || 'Untitled').trim().slice(0, 500) || 'Untitled', data: data,
+            editors: eds, collaborators: people(it.collaborators, userIds).filter(function (x) { return eds.indexOf(x) < 0; }),
+            files: arr(it.files).slice(0, 200).map(function (f) {
+              return { id: String(f.id || '').replace(/[^\w-]/g, '').slice(0, 120), name: String(f.name || '').slice(0, 200), mimeType: String(f.mimeType || '').slice(0, 100), size: Number(f.size) || 0, uploadedBy: String(f.uploadedBy || '').slice(0, 120), uploadedAt: String(f.uploadedAt || '').slice(0, 40) };
+            }),
+            stageChangedAt: String(it.stageChangedAt || now).slice(0, 40), createdBy: String(it.createdBy || me.id).slice(0, 120),
+            createdAt: String(it.createdAt || now).slice(0, 40), updatedAt: String(it.updatedAt || now).slice(0, 40),
+          };
+        });
+        var newComments = arr(p.comments).filter(function (c) { return idMap[String(c.itemId)]; }).slice(0, 20000).map(function (c) {
+          return {
+            id: store.uid(), sectionId: newId, itemId: idMap[String(c.itemId)], kind: c.kind === 'log' ? 'log' : 'comment',
+            author: String(c.author || '').slice(0, 120), text: String(c.text || '').slice(0, MAX_TEXT),
+            createdAt: String(c.createdAt || now).slice(0, 40), updatedAt: String(c.updatedAt || now).slice(0, 40),
+          };
+        });
+        var newAccess = !p.withAccess ? [] : arr(p.access).filter(function (a) {
+          return userIds[a.userId] && !isSuperId(a.userId) && rank(a.level) >= 1;
+        }).map(function (a) {
+          return { id: store.uid(), sectionId: newId, userId: a.userId, level: LEVELS[rank(a.level)], createdBy: me.id, createdAt: now, updatedAt: now };
+        });
+        var many = store.insertMany || function (t, recs) { recs.forEach(function (r) { store.insert(t, r); }); };
+        store.insert('sections', rSec);
+        if (newItems.length) many('items', newItems);
+        if (newComments.length) many('comments', newComments);
+        if (newAccess.length) many('access', newAccess);
+        var out = clone(rSec);
+        out.myLevel = 'manager';
+        return { section: out, items: newItems, comments: newComments, access: newAccess };
+      }
+
       case 'user.create': {
         needSuper();
         var id = String(p.id || '').trim().toLowerCase();

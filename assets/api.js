@@ -165,6 +165,7 @@
     return {
       all: (t) => clone(load()[t]),
       insert: (t, rec) => { load()[t].push(clone(rec)); persist(); },
+      insertMany: (t, recs) => { load()[t].push(...clone(recs)); persist(); },
       save: (t, rec) => {
         const rows = load()[t];
         const i = rows.findIndex((r) => r.id === rec.id);
