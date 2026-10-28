@@ -15,8 +15,8 @@ VIDEOS = [
     ('Working with items', '1:25', 'Add an item, assign people, move it through stages, comment, share a link, full screen.', 'https://drive.google.com/file/d/1x4-5Khg69a8Eap-GP_x1pUWyY_jsDN1M/view?usp=sharing'),
     ('Filters, sorting and reports', '0:52', 'Sort and filter a section and export a report.', 'https://drive.google.com/file/d/1KMewwVh-0uxaG5pGuhmDPRPSHLOIX1wT/view?usp=sharing'),
     ('For section managers', '1:04', 'Customize columns, team performance, calendars and dashboard reports.', 'https://drive.google.com/file/d/1xgY_SuFE87hrDAehZ_zMF1ZqglcWy7Dl/view?usp=sharing'),
-    ('For super admins', '1:00', 'Users, access levels and sections.', 'https://drive.google.com/file/d/1pXKX7fMlPotWcf5XEPdH3NHIHlYez0B9/view?usp=sharing'),
-    ('Full guide (all five parts)', '5:44', 'Everything above in one video.', 'https://drive.google.com/file/d/1YoClpq_5nF7vRe8OGtArs23vrlz2AKPI/view?usp=sharing'),
+    ('For super admins', '1:08', 'Users, access levels, sections, and removing and restoring a section.', 'https://drive.google.com/file/d/1pXKX7fMlPotWcf5XEPdH3NHIHlYez0B9/view?usp=sharing'),
+    ('Full guide (all five parts)', '5:52', 'Everything above in one video.', 'https://drive.google.com/file/d/1YoClpq_5nF7vRe8OGtArs23vrlz2AKPI/view?usp=sharing'),
 ]
 
 BLOCKS = [
@@ -218,10 +218,10 @@ BLOCKS = [
         'Send them the Project Hub address. They sign in with that Google account.',
     ]),
     ('h2', 'Managing sections'),
-    ('img', '19_manage_sections', 'Manage sections: reorder, customize or remove sections, and restore removed ones.'),
+    ('img', '19_manage_sections', 'Manage sections: reorder, customize, back up or remove sections, and restore archives.'),
     ('bullets', [
         'Use **↑ ↓** to change the order in the sidebar.',
-        '**Remove** hides a section from everyone. Its data stays in the Google Sheet and **Restore** brings it back.',
+        '**Remove** permanently deletes a section and all its data from the Google Sheet, after downloading an archive file. See the next pages.',
     ]),
     ('img', '20_new_section', 'New section: start blank or from a template.'),
     ('steps', [
@@ -229,22 +229,22 @@ BLOCKS = [
         'Start from **Blank** or a template (RFQ & Tender, Projects, Project Tasks, Payment & Claims).',
         'Click **Create section**, adjust its columns, then give people access under Users & access.',
     ]),
-    ('h2', 'Archiving, backing up and restoring a section'),
+    ('h2', 'Backing up, removing and restoring a section'),
     ('p', 'Super admins can save any section as one archive file, keep it outside Project Hub, and bring it back later. '
           'The file holds the section’s columns and stages, every item, comments and activity, editors and collaborators, people’s access, and the list of attachments.'),
     ('bullets', [
         '**Back up** downloads the archive file. The section stays as it is.',
-        '**Archive** downloads the file and then removes the section for everyone. Its data also stays in the Google Sheet, and **Restore** in the Removed list brings it back.',
-        '**Restore from archive** uploads a file and creates a new section from it. Existing sections are never changed.',
+        '**Remove** downloads the archive file first (you can untick this), then **permanently deletes** the section, its items, comments, activity and access from the Google Sheet, and its Google Calendar events.',
+        '**Restore from archive** uploads a file and writes the section back into the platform and the Google Sheet. Existing sections are never changed.',
     ]),
-    ('img', '21_archive', 'Archive a section: optional password, and a tick to confirm removal.'),
+    ('img', '21_archive', 'Remove a section: archive file first, optional password, and type the name to confirm.'),
     ('steps', [
-        'Open **Manage sections** and click **Back up** or **Archive** next to the section.',
+        'Open **Manage sections** and click **Back up** or **Remove** next to the section.',
         'Optionally set a password. The file is then encrypted (AES-256) and cannot be opened or restored without it.',
-        'For Archive, tick the confirmation box. Click **Download backup** or **Download and archive**.',
-        'Keep the .html file somewhere safe, such as a company Google Drive folder.',
+        'For Remove, keep **Download an archive file first** ticked and type the section name to confirm, then click **Delete permanently**. For a backup, click **Download backup**.',
+        'Keep the .html file somewhere safe, such as a company Google Drive folder. After a Remove it is the only copy of that section.',
     ]),
-    ('warn', 'A lost password cannot be recovered. Keep it with the file’s owner or in the company password manager.'),
+    ('warn', 'Remove cannot be undone without the archive file, and a lost password cannot be recovered. Attachments stay in Google Drive so they still open after a restore.'),
     ('h2', 'Opening an archive file outside Project Hub'),
     ('img', '23_archive_viewer', 'An archive file opened in a browser: search, filter by stage, click a row for full details.'),
     ('p', 'Double-click the archive file. It opens in any browser, offline and without signing in, read only. Enter the password if it has one. '
@@ -257,7 +257,7 @@ BLOCKS = [
         'Check the summary and the name. If the name is already used, “(restored)” is added; you can change it.',
         'Leave **Give back people’s access** ticked to restore everyone’s access level, then click **Restore section**.',
     ]),
-    ('tip', 'Editors and collaborators whose accounts were deleted are left off. Attachments point to the same Google Drive files as before.'),
+    ('tip', 'When the original section was removed, the restore reuses its original identity, so links from other sections (for example claims to a project), shared item links and calendar events reconnect by themselves. Editors and collaborators whose accounts were deleted are left off.'),
     ('h2', 'Google Calendar'),
     ('p', 'Items with a deadline become events in the “Project Hub” calendar of the account that runs the backend, with the item’s editors, collaborators and named people as guests. After many changes at once, open **Calendar** and click **Re-sync Google Calendar**.'),
 

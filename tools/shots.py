@@ -121,10 +121,10 @@ def main():
         page.click('.pane-h .x')
 
         # Archive, back up, restore
-        page.click('[data-act=arc-open][data-mode=archive][data-id=s_tasks]')
+        page.click('[data-act=arc-open][data-mode=remove][data-id=s_tasks]')
         page.fill('#archiveForm [name=pw]', 'example-password')
         page.fill('#archiveForm [name=pw2]', 'example-password')
-        page.check('#archiveForm [name=confirm]')
+        page.fill('#archiveForm [name=confirmName]', 'Project Tasks')
         shot(page, '21_archive')
         page.click('.pane-h .x')
         page.click('[data-act=arc-open][data-mode=backup][data-id=s_tasks]')

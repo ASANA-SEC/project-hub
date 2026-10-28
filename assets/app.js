@@ -1571,14 +1571,14 @@
       <td class="r">${S.items.filter((it) => it.sectionId === s.id).length}</td><td class="r">${s.fields.length}</td>
       <td class="nw">${stageF(s) ? esc(stageF(s).label) : '<span class="muted">Table only</span>'}</td>
       <td class="r">${S.access.filter((a) => a.sectionId === s.id).length}</td>
-      <td class="nw r">${s.archived ? `<button class="btn sm" data-act="arc-open" data-mode="backup" data-id="${esc(s.id)}">Back up</button> <button class="btn sm" data-act="sec-restore" data-id="${esc(s.id)}">Restore</button>`
-        : `<a class="btn sm" href="#s/${esc(s.id)}/customize">Customize</a> <button class="btn sm" data-act="arc-open" data-mode="backup" data-id="${esc(s.id)}">Back up</button> <button class="btn sm" data-act="arc-open" data-mode="archive" data-id="${esc(s.id)}">Archive</button> <button class="btn sm danger${S._armSec === s.id ? ' armed' : ''}" data-act="sec-archive" data-id="${esc(s.id)}">${S._armSec === s.id ? 'Click again to remove' : 'Remove'}</button>`}</td></tr>`;
+      <td class="nw r">${s.archived ? `<button class="btn sm" data-act="arc-open" data-mode="backup" data-id="${esc(s.id)}">Back up</button> <button class="btn sm" data-act="sec-restore" data-id="${esc(s.id)}">Show again</button> <button class="btn sm danger" data-act="arc-open" data-mode="remove" data-id="${esc(s.id)}">Delete permanently</button>`
+        : `<a class="btn sm" href="#s/${esc(s.id)}/customize">Customize</a> <button class="btn sm" data-act="arc-open" data-mode="backup" data-id="${esc(s.id)}">Back up</button> <button class="btn sm danger" data-act="arc-open" data-mode="remove" data-id="${esc(s.id)}">Remove</button>`}</td></tr>`;
     return `
-      <div class="head"><div><h1>Manage sections</h1><div class="sub">Add, rename, reorder or remove sections. <b>Back up</b> downloads a section as one archive file you can open in any browser; <b>Archive</b> does the same and then removes the section. <b>Restore from archive</b> brings a file back as a new section.</div></div>
+      <div class="head"><div><h1>Manage sections</h1><div class="sub">Add, rename and reorder sections. <b>Back up</b> downloads a section as one archive file you can open in any browser. <b>Remove</b> downloads that file and then deletes the section and all its data from the Google Sheet. <b>Restore from archive</b> puts a file back into the platform and the Google Sheet.</div></div>
         <div class="toolbar"><button class="btn" data-act="arc-restore">Restore from archive</button><button class="btn primary" data-act="sec-new">+ New section</button></div></div>
       ${live.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Order</th><th>Section</th><th class="r">Items</th><th class="r">Columns</th><th>Board by</th><th class="r">Users</th><th></th></tr></thead><tbody>${live.map(row).join('')}</tbody></table></div>`
         : `<div class="empty-state"><b>No sections yet</b><button class="btn primary" data-act="seed-sections" style="margin-top:10px">Create the standard sections</button></div>`}
-      ${gone.length ? `<div class="group"><h2>Removed</h2><div class="tablewrap"><table class="t"><tbody>${gone.map(row).join('')}</tbody></table></div></div>` : ''}`;
+      ${gone.length ? `<div class="group"><h2>Hidden (removed before permanent delete existed)</h2><div class="tablewrap"><table class="t"><tbody>${gone.map(row).join('')}</tbody></table></div></div>` : ''}`;
   }
 
   // ------------------------------------------------------------ super admin: archive, back up, restore
@@ -1615,62 +1615,79 @@
     const items = S.items.filter((it) => it.sectionId === s.id);
     const files = items.reduce((t, it) => t + (it.files || []).length, 0);
     const comments = S.comments.filter((c) => items.some((it) => it.id === c.itemId)).length;
-    const archive = mode === 'archive';
+    const remove = mode === 'remove';
     S.drawer = { kind: 'archive', id, mode };
     drawerEl.innerHTML = `
       <div class="scrim" data-act="close-drawer"></div>
       <div class="pane" role="dialog" aria-modal="true" aria-labelledby="paneTitle">
-        <div class="pane-h"><div><div class="k">Manage sections</div><h2 id="paneTitle">${archive ? 'Archive' : 'Back up'} ${esc(s.name)}</h2></div><button type="button" class="x" data-act="close-drawer" aria-label="Close">×</button></div>
+        <div class="pane-h"><div><div class="k">Manage sections</div><h2 id="paneTitle">${remove ? 'Remove' : 'Back up'} ${esc(s.name)}</h2></div><button type="button" class="x" data-act="close-drawer" aria-label="Close">×</button></div>
         <div class="pane-b">
           <form id="archiveForm" class="form" novalidate>
-            <div class="fld wide"><span>What goes into the file</span>
+            ${remove ? `<div class="banner danger wide"><span><b>This permanently deletes ${esc(s.name)}</b> and everything in it from the Google Sheet: ${items.length} items, ${comments} comments and activity entries, and ${S.access.filter((a) => a.sectionId === s.id).length} people’s access. Its Google Calendar events are deleted too. Only an archive file can bring it back.</span></div>` : ''}
+            <div class="fld wide"><span>${remove ? 'The archive file will contain' : 'What goes into the file'}</span>
               <div class="arc-sum"><span><b>${items.length}</b> items</span><span><b>${comments}</b> comments and activity entries</span><span><b>${s.fields.length}</b> columns and stages</span><span><b>${S.access.filter((a) => a.sectionId === s.id).length}</b> people’s access</span><span><b>${files}</b> attachment records</span></div>
-              <small class="muted">Attachments are listed with their names; the files themselves stay in the company Google Drive.</small></div>
-            <div class="banner info wide"><span>You get one <b>.html</b> file. Double-click it to view the section in any browser, offline, without signing in. To bring it back, use <b>Restore from archive</b>.</span></div>
-            <label class="fld"><span>Password (optional)</span><input type="password" name="pw" autocomplete="new-password" placeholder="Leave empty for no password"></label>
+              <small class="muted">Attachments are listed with their names; the files themselves stay in the company Google Drive, so they still open after a restore.</small></div>
+            ${remove ? `<label class="fld chk wide"><input type="checkbox" name="backup" checked><span><b>Download an archive file first</b> (strongly recommended)</span></label>` : `<div class="banner info wide"><span>You get one <b>.html</b> file. Double-click it to view the section in any browser, offline, without signing in. To bring it back, use <b>Restore from archive</b>.</span></div>`}
+            <label class="fld"><span>Password for the file (optional)</span><input type="password" name="pw" autocomplete="new-password" placeholder="Leave empty for no password"></label>
             <label class="fld"><span>Repeat password</span><input type="password" name="pw2" autocomplete="new-password"></label>
             <small class="muted wide">With a password the file is encrypted (AES-256). Nobody can open or restore it without the password, and a lost password cannot be recovered.</small>
-            ${archive ? `<label class="fld chk wide"><input type="checkbox" name="confirm"><span>After the file downloads, remove <b>${esc(s.name)}</b> from the platform for everyone. Its data stays in the Google Sheet.</span></label>` : ''}
-            <div class="form-actions"><button type="submit" class="btn primary" id="saveBtn">${archive ? 'Download and archive' : 'Download backup'}</button><button type="button" class="btn" data-act="close-drawer">Cancel</button></div>
+            ${remove ? `<label class="fld wide"><span>Type <b>${esc(s.name)}</b> to confirm</span><input type="text" name="confirmName" autocomplete="off"></label>` : ''}
+            <div class="form-actions"><button type="submit" class="btn ${remove ? 'danger armed' : 'primary'}" id="saveBtn">${remove ? 'Delete permanently' : 'Download backup'}</button><button type="button" class="btn" data-act="close-drawer">Cancel</button></div>
           </form>
         </div>
       </div>`;
-    openDrawer('input[name=pw]');
+    openDrawer(remove ? 'input[name=backup]' : 'input[name=pw]');
+  }
+
+  function downloadArchive(s, html, mode) {
+    const name = 'ProjectHub_' + (s.name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'Section') + '_' + (mode === 'remove' ? 'archive' : 'backup') + '_' + today() + '.html';
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return name;
   }
 
   async function runArchiveExport(form) {
     const { id, mode } = S.drawer;
     const s = section(id);
+    const remove = mode === 'remove';
+    const backup = !remove || form.elements.backup.checked;
     const pw = form.elements.pw.value;
-    if (pw !== form.elements.pw2.value) { toast('The two passwords do not match.', true); return; }
-    if (pw && pw.length < 6) { toast('Use a password of at least 6 characters.', true); return; }
-    if (mode === 'archive' && !form.elements.confirm.checked) { toast('Tick the box to confirm the section should be removed after download.', true); return; }
+    if (backup && pw !== form.elements.pw2.value) { toast('The two passwords do not match.', true); return; }
+    if (backup && pw && pw.length < 6) { toast('Use a password of at least 6 characters.', true); return; }
+    if (remove && form.elements.confirmName.value.trim().toLowerCase() !== s.name.trim().toLowerCase()) {
+      toast('Type the section name exactly to confirm.', true);
+      form.elements.confirmName.focus();
+      return;
+    }
     const btn = $('#saveBtn');
     btn.disabled = true;
-    btn.textContent = 'Preparing…';
+    btn.textContent = backup ? 'Preparing the file…' : 'Deleting…';
     try {
-      const html = await window.Archive.build(archivePayload(s), pw);
-      const name = 'ProjectHub_' + (s.name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'Section') + '_' + (mode === 'archive' ? 'archive' : 'backup') + '_' + today() + '.html';
-      const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-      if (mode === 'archive' && !s.archived) {
-        const res = await API.call('section.update', { id: s.id, patch: { archived: true } });
-        replaceSection(res.section);
-        toast('Archive file downloaded and ' + s.name + ' removed. Restore it any time.');
+      let file = '';
+      if (backup) file = downloadArchive(s, await window.Archive.build(archivePayload(s), pw), mode);
+      if (remove) {
+        btn.textContent = 'Deleting…';
+        const res = await API.call('section.delete', { id: s.id, confirmName: form.elements.confirmName.value });
+        const gone = new Set(res.itemIds);
+        S.sections = S.sections.filter((x) => x.id !== s.id);
+        S.items = S.items.filter((it) => it.sectionId !== s.id);
+        S.comments = S.comments.filter((c) => !gone.has(c.itemId));
+        S.access = S.access.filter((a) => a.sectionId !== s.id);
+        toast(s.name + ' deleted from the platform and the Google Sheet.' + (file ? ' Archive file downloaded.' : ''));
       } else {
-        toast('Backup downloaded: ' + name);
+        toast('Backup downloaded: ' + file);
       }
       closeDrawer();
       render();
     } catch (e) {
       btn.disabled = false;
-      btn.textContent = mode === 'archive' ? 'Download and archive' : 'Download backup';
+      btn.textContent = remove ? 'Delete permanently' : 'Download backup';
       handleError(e);
     }
   }
@@ -1701,7 +1718,8 @@
             ${p ? `
               <div class="fld wide"><span>In this archive</span><div class="arc-sum"><span><b>${p.items.length}</b> items</span><span><b>${p.comments.length}</b> comments and activity</span><span><b>${p.section.fields.length}</b> columns</span><span>exported ${esc(fmtDate(p.exportedAt))} by ${esc(p.exportedByName)}</span></div></div>
               <label class="fld wide"><span>Restore as a new section named</span><input type="text" name="name" value="${esc(taken ? p.section.name + ' (restored)' : p.section.name)}"></label>
-              ${taken ? '<small class="muted wide">A section with this name already exists. Nothing in it will change; the archive comes back as a separate section.</small>' : ''}
+              ${taken ? '<small class="muted wide">A section with this name already exists. Nothing in it will change; the archive comes back as a separate copy.</small>'
+                : '<small class="muted wide">The section and its items are written back into the Google Sheet. If the original was deleted, links from other sections, shared item links and calendar events reconnect.</small>'}
               <label class="fld chk wide"><input type="checkbox" name="withAccess"${people.length ? ' checked' : ' disabled'}><span>Give back people’s access (${people.length} ${people.length === 1 ? 'person' : 'people'} who still have accounts)</span></label>
               <small class="muted wide">Editors and collaborators who no longer have an account are left off. Attachments point to the same Google Drive files as before.</small>
               <div class="form-actions"><button type="submit" class="btn primary" id="saveBtn">Restore section</button><button type="button" class="btn" data-act="close-drawer">Cancel</button></div>` : ''}
@@ -1750,7 +1768,7 @@
       S.comments = S.comments.concat(res.comments);
       S.access = S.access.concat(res.access);
       closeDrawer();
-      toast(name + ' restored with ' + res.items.length + ' items');
+      toast(name + ' restored into the platform and the Google Sheet: ' + res.items.length + ' items' + (res.reusedIds ? '. Links from other sections reconnected.' : ''));
       location.hash = '#s/' + res.section.id;
       render();
     } catch (e) {

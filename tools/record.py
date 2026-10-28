@@ -392,11 +392,19 @@ def ch5():
 
     def remove(p):
         click(p, '#nav a[data-nav=sections]')
-        sel = 'tr:has-text("Procurement") [data-act=sec-archive]'
-        click(p, sel)
-        click(p, sel)
+        click(p, 'tr:has-text("Procurement") [data-act=arc-open][data-mode=remove]')
+        move(p, '#archiveForm [name=backup]')
+        type_into(p, '#archiveForm [name=confirmName]', 'Procurement', delay=70)
+        with p.expect_download():
+            click(p, '#saveBtn')
+        p.wait_for_timeout(900)
+
+    def restore(p):
+        click(p, '[data-act=arc-restore]')
         p.wait_for_timeout(600)
-        move(p, '[data-act=sec-restore]')
+        move(p, '#arcFile')
+        p.wait_for_timeout(900)
+        click(p, '.pane-h .x')
 
     def end(p): card(p, 'Project Hub', 'Thank you for watching', 'Open Help in Project Hub any time for the full user guide')
 
@@ -407,7 +415,8 @@ def ch5():
         ('Set their access for each section, then click Add user. They can sign in straight away with that Google account.', access),
         ('In Manage sections, click New section, give it a name, and start from blank or from a template.', sections),
         ('Click Create section, then adjust its columns. Give people access to it under Users and access.', create),
-        ('Remove hides a section from everyone. Its data is kept, and Restore brings it back.', remove),
+        ('Remove downloads an archive file of the section, then deletes the section and its data from the Google Sheet. Type the name to confirm.', remove),
+        ('Restore from archive puts a section back into the platform and the Google Sheet from that file.', restore),
         ('Thank you for watching. Open Help in Project Hub any time for the full user guide.', end),
     ])
 

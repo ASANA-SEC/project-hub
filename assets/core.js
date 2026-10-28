@@ -369,13 +369,36 @@ var Core = (function () {
         return { section: c7 };
       }
 
+      case 'section.delete': {
+        // Permanently delete a section and everything in it from storage. Cannot be undone.
+        needSuper();
+        var ds = getSection(p.id);
+        if (String(p.confirmName || '').trim().toLowerCase() !== String(ds.name).trim().toLowerCase()) {
+          throw fail('BAD_REQUEST', 'Type the section name exactly to confirm.');
+        }
+        var gone = {};
+        store.all('items').forEach(function (it) { if (it.sectionId === ds.id) gone[it.id] = true; });
+        store.delWhere('comments', function (c) { return c.sectionId === ds.id || gone[c.itemId]; });
+        store.delWhere('items', function (it) { return it.sectionId === ds.id; });
+        store.delWhere('access', function (a) { return a.sectionId === ds.id; });
+        store.del('sections', ds.id);
+        return { id: ds.id, itemIds: Object.keys(gone) };
+      }
+
       case 'section.restore': {
-        // Bring a section back from an archive file as a NEW section. Never touches existing data.
+        // Bring a section back from an archive file. Never touches existing data.
+        // If the original section and its items are gone, their original ids are reused, so links from
+        // other sections, shared item links and calendar events reconnect. Otherwise it becomes a new copy.
         needSuper();
         var src = p.section || {};
         var oldId = String(src.id || '');
         var rIds = sections.map(function (s) { return s.id; });
-        var newId = store.uid();
+        var srcItems = arr(p.items).slice(0, 5000);
+        var taken = {};
+        store.all('items').forEach(function (it) { taken[it.id] = true; });
+        var idOk = function (v) { return /^[\w-]{1,60}$/.test(String(v || '')); };
+        var reuse = idOk(oldId) && !secById[oldId] && srcItems.every(function (it) { return idOk(it.id) && !taken[it.id]; });
+        var newId = reuse ? oldId : store.uid();
         var rFields = cleanFields((src.fields || []).map(function (f) {
           var c = clone(f);
           if (c.type === 'link' && c.target === oldId) c.target = newId; // links inside the archived section
@@ -389,9 +412,8 @@ var Core = (function () {
           fields: rFields, stageField: cleanStageField(rFields, src.stageField), archived: false,
           createdBy: me.id, createdAt: now, updatedAt: now,
         };
-        var srcItems = arr(p.items).slice(0, 5000);
         var idMap = {};
-        srcItems.forEach(function (it) { idMap[String(it.id)] = store.uid(); });
+        srcItems.forEach(function (it) { idMap[String(it.id)] = reuse ? String(it.id) : store.uid(); });
         var selfLinks = rFields.filter(function (f) { return f.type === 'link' && f.target === newId; }).map(function (f) { return f.key; });
         var newItems = srcItems.map(function (it) {
           var data = cleanData(rSec, it.data || {}, userIds);
@@ -426,7 +448,7 @@ var Core = (function () {
         if (newAccess.length) many('access', newAccess);
         var out = clone(rSec);
         out.myLevel = 'manager';
-        return { section: out, items: newItems, comments: newComments, access: newAccess };
+        return { section: out, items: newItems, comments: newComments, access: newAccess, reusedIds: reuse };
       }
 
       case 'user.create': {

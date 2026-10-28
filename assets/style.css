@@ -577,3 +577,5 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
 /* ---------- archive / restore ---------- */
 .arc-sum { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); font-size: 13px; }
 .arc-sum b { font-variant-numeric: tabular-nums; }
+.banner.danger { background: var(--crit-soft); border-color: color-mix(in srgb, var(--crit) 35%, transparent); }
+.banner.danger b { color: var(--crit); }

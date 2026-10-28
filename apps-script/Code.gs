@@ -137,6 +137,7 @@ function afterChange_(store, action, result) {
   else if (action === 'item.remove') dropEvent_(store, result.id);
   else if (action === 'section.update') resyncCalendar_(store, result.section.id, 90 * 1000);
   else if (action === 'section.restore') resyncCalendar_(store, result.section.id, 120 * 1000);
+  else if (action === 'section.delete') dropEvents_(store, result.itemIds);
 }
 
 /** Create, update or remove the Google Calendar event for one item. */
@@ -205,6 +206,19 @@ function dropEvent_(store, itemId) {
     // Already gone from the calendar.
   }
   store.del('calendar', itemId);
+}
+
+/** Delete the calendar events of many items at once (used when a section is deleted). */
+function dropEvents_(store, itemIds) {
+  const want = {};
+  (itemIds || []).forEach(function (id) { want[id] = true; });
+  const links = store.all('calendar').filter(function (r) { return want[r.id]; });
+  if (!links.length) return;
+  const cal = calendar_();
+  links.forEach(function (r) {
+    try { const ev = cal.getEventById(r.eventId); if (ev) ev.deleteEvent(); } catch (e) { /* already gone */ }
+  });
+  store.delWhere('calendar', function (r) { return want[r.id]; });
 }
 
 /** Sync many items within a time budget; returns how many were done and how many are left. */
@@ -287,8 +301,23 @@ function sheetStore_() {
       delete cache[t];
     },
     delWhere: function (t, fn) {
-      const hits = rows(t).filter(function (r) { return fn(r.rec); }).sort(function (a, b) { return b.row - a.row; });
-      hits.forEach(function (x) { sheet_(t).deleteRow(x.row); });
+      const all = rows(t);
+      const hits = all.filter(function (r) { return fn(r.rec); });
+      if (!hits.length) return;
+      const sh = sheet_(t);
+      if (hits.length <= 10) {
+        hits.sort(function (a, b) { return b.row - a.row; }).forEach(function (x) { sh.deleteRow(x.row); });
+      } else {
+        // Many rows: rewrite the table once instead of deleting row by row
+        const width = TABLES[t].length;
+        const last = sh.getLastRow();
+        const raw = last > 1 ? sh.getRange(2, 1, last - 1, width).getValues() : [];
+        const drop = {};
+        hits.forEach(function (x) { drop[x.row] = true; });
+        const keep = raw.filter(function (r, i) { return !drop[i + 2]; });
+        if (last > 1) sh.getRange(2, 1, last - 1, width).clearContent();
+        if (keep.length) sh.getRange(2, 1, keep.length, width).setValues(keep);
+      }
       delete cache[t];
     },
     now: function () { return new Date().toISOString(); },
