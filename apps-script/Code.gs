@@ -56,10 +56,16 @@ function setup() {
     let sh = ss.getSheetByName(name);
     if (!sh) sh = ss.insertSheet(name);
     const cols = TABLES[name];
-    sh.getRange(1, 1, 1, cols.length).setValues([cols]).setFontWeight('bold');
-    sh.setFrozenRows(1);
-    // Keep dates and codes as typed text; numbers are coerced on read.
-    sh.getRange(1, 1, sh.getMaxRows(), cols.length).setNumberFormat('@');
+    sh.getRange(1, 1, 1, cols.length).setValues([cols]);
+    try {
+      sh.getRange(1, 1, 1, cols.length).setFontWeight('bold');
+      sh.setFrozenRows(1);
+      // Keep dates and codes as typed text; numbers are coerced on read.
+      sh.getRange(1, 1, sh.getMaxRows(), cols.length).setNumberFormat('@');
+    } catch (e) {
+      // A Google Sheets "Table" with typed columns refuses formatting and may reject the app's data.
+      Logger.log('WARNING: tab "' + name + '" is a Google Sheets Table (' + e.message + '). Convert it back to a normal range: click the table, open its menu and choose to revert or convert to a range.');
+    }
   });
   const blank = ss.getSheetByName('Sheet1');
   if (blank && ss.getSheets().length > 1) ss.deleteSheet(blank);
