@@ -109,6 +109,7 @@
   const optOf = (f, v) => (f && f.options || []).find((o) => o.value === v);
   const stageOpt = (s, it) => { const f = stageF(s); return f ? optOf(f, val(it, f)) : null; };
   const isDone = (s, it) => { const o = stageOpt(s, it); return !!(o && o.done); };
+  const dueMet = (s, it) => { const o = stageOpt(s, it); return !!(o && o.met); };
   const sectionOf = (it) => section(it.sectionId);
   const involved = (it) => (it.editors || []).includes(S.me.id) || (it.collaborators || []).includes(S.me.id) ||
     (sectionOf(it) ? sectionOf(it).fields.some((f) => f.type === 'person' && val(it, f) === S.me.id) : false);
@@ -123,7 +124,7 @@
   function chip(c) { return c ? `<span class="chip ${c.cls}">${esc(c.text)}</span>` : ''; }
   function dueInfo(s, it) {
     const f = dueF(s);
-    if (!f || isDone(s, it)) return null;
+    if (!f || isDone(s, it) || dueMet(s, it)) return null;
     const v = val(it, f);
     if (!v) return null;
     if (f.type === 'datetime') {
@@ -1244,7 +1245,7 @@
       const mine = scoped.filter((it) => owns(it, u.id));
       const open = mine.filter((it) => !isDone(sectionOf(it), it));
       const late = open.filter((it) => { const d = dueInfo(sectionOf(it), it); return d && d.sev === 2; });
-      const soon = open.filter((it) => { const s = sectionOf(it); const f = dueF(s); const v = f && val(it, f); const n = v ? daysFromToday(v.slice(0, 10)) : null; return n !== null && n >= 0 && n <= 7; });
+      const soon = open.filter((it) => { const s = sectionOf(it); const f = !dueMet(s, it) && dueF(s); const v = f && val(it, f); const n = v ? daysFromToday(v.slice(0, 10)) : null; return n !== null && n >= 0 && n <= 7; });
       const waiting = open.filter((it) => ageInfo(sectionOf(it), it));
       const done = mine.filter((it) => isDone(sectionOf(it), it) && inPeriod(it.stageChangedAt));
       const withDue = done.filter((it) => { const f = dueF(sectionOf(it)); return f && val(it, f); });
@@ -1539,7 +1540,7 @@
   function viewMyWork() {
     const mine = S.items.filter((it) => { const s = sectionOf(it); return s && !s.archived && involved(it); });
     const open = mine.filter((it) => !isDone(sectionOf(it), it));
-    const dueN = (it) => { const s = sectionOf(it); const f = dueF(s); const v = f && val(it, f); return v ? daysFromToday(v.slice(0, 10)) : null; };
+    const dueN = (it) => { const s = sectionOf(it); const f = !dueMet(s, it) && dueF(s); const v = f && val(it, f); return v ? daysFromToday(v.slice(0, 10)) : null; };
     const groups = [
       { k: 'Late', cls: 'crit', f: (it) => dueN(it) !== null && dueN(it) < 0 },
       { k: 'Today', f: (it) => dueN(it) === 0 },
@@ -1832,12 +1833,13 @@
         ${flags.length ? `<div class="tf-flags">${flags.join('')}${isStage ? '<span class="chip info">Board columns</span>' : ''}</div>` : ''}
         ${f.type === 'link' ? `<label class="fld" style="max-width:320px"><span>Links to section</span><select data-tf="${i}" data-prop="target"><option value="">Choose a section</option>${otherSecs.map((x) => `<option value="${esc(x.id)}"${f.target === x.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>` : ''}
         ${f.type === 'select' ? `<div class="opts">
-          <div class="opts-h"><span>Options</span>${isStage ? '<span class="muted">Alert after = days an item may stay in this stage before it is flagged. Done = finished, no late alerts.</span>' : ''}</div>
+          <div class="opts-h"><span>Options</span>${isStage ? '<span class="muted">Alert after = days an item may stay in this stage before it is flagged. Deadline met = still open, but the due date no longer matters (e.g. submitted). Done = finished, no late alerts.</span>' : ''}</div>
           ${(f.options || []).map((o, j) => `<div class="opt">
             <span class="dot f-${o.color}"></span>
             <input type="text" value="${esc(o.label)}" data-to="${i}.${j}" data-prop="label" aria-label="Option name">
             <select data-to="${i}.${j}" data-prop="color" aria-label="Colour">${Core.COLORS.map((c) => `<option value="${c}"${o.color === c ? ' selected' : ''}>${COLOR_LABEL[c]}</option>`).join('')}</select>
             ${isStage ? `<label class="mini">Alert after <input type="number" min="0" max="365" value="${o.alertDays || ''}" data-to="${i}.${j}" data-prop="alertDays" aria-label="Alert after days"> d</label>
+              <label class="mini"><input type="checkbox" ${o.met ? 'checked' : ''} data-to="${i}.${j}" data-prop="met"> Deadline met</label>
               <label class="mini"><input type="checkbox" ${o.done ? 'checked' : ''} data-to="${i}.${j}" data-prop="done"> Done</label>` : ''}
             <button type="button" class="ibtn" data-act="opt-move" data-i="${i}" data-j="${j}" data-dir="-1" ${j === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
             <button type="button" class="ibtn" data-act="opt-move" data-i="${i}" data-j="${j}" data-dir="1" ${j === f.options.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
@@ -2537,7 +2539,7 @@
       const [i, j] = t.dataset.to.split('.').map(Number);
       const o = S.tpl.fields[i].options[j];
       const prop = t.dataset.prop;
-      if (prop === 'done') { if (t.checked) o.done = true; else delete o.done; return false; }
+      if (prop === 'done' || prop === 'met') { if (t.checked) o[prop] = true; else delete o[prop]; return false; }
       if (prop === 'alertDays') { const n = Number(t.value); if (n > 0) o.alertDays = n; else delete o.alertDays; return false; }
       o[prop] = t.value;
       return prop === 'color';

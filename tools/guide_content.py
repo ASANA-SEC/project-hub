@@ -175,7 +175,7 @@ BLOCKS = [
         ['Link to another section', 'Connect items, such as a claim to its project.'],
         ['Web link', 'A link to a folder or a portal.'],
     ]),
-    ('p', 'For the stage dropdown, **Alert after** sets how many days an item may stay in that stage before it shows as waiting (amber, then red at twice the time). Tick **Done** for finished stages; done items get no late alerts and count as completed.'),
+    ('p', 'For the stage dropdown, **Alert after** sets how many days an item may stay in that stage before it shows as waiting (amber, then red at twice the time). Tick **Deadline met** for stages that are still open but past caring about the deadline, such as Tender Submitted: those items stop showing as late. Tick **Done** for finished stages; done items get no late alerts and count as completed.'),
     ('tip', 'Removing a column only hides it. Values already entered stay in the Google Sheet, so you can add the column back.'),
     ('h2', 'Team performance'),
     ('img', '15_performance', 'Team performance: workload and completion per person, with open work split by section.'),

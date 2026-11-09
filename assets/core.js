@@ -109,6 +109,7 @@ var Core = (function () {
           var d = Number(op.alertDays);
           if (d > 0) r.alertDays = Math.min(365, Math.round(d));
           if (op.done) r.done = true;
+          if (op.met && !op.done) r.met = true;
           return r;
         }).filter(function (op) {
           if (!op.value || !op.label || seenOpt[op.value]) return false;
