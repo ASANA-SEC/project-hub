@@ -109,7 +109,7 @@ function doGet() {
 function doPost(e) {
   try {
     const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-    // Asked every 10 s by every open page: answer from the cache, without opening the Sheet.
+    // Asked every few seconds by every open page: answer from the cache, without opening the Sheet.
     if (req.action === 'sync.rev') {
       verifySession_(req.token);
       return json_({ ok: true, data: { rev: rev_() } });

@@ -121,9 +121,9 @@ GitHub Pages（网页） ──Google 登录凭证──▶ Google Apps Script�
 
 > 以后 Code.gs 或 core.js 有更新，两个文件都要重新贴，再按 **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**，网址不会变。
 
-> **2026-11 更新（留言照片 / 5 分钟改删 / 24 小时登录 / 10 秒同步）**：重贴 Code.gs 和 Core 之后，**再跑一次 setup**（只会在 comments 分页补上 `files`、`editedAt` 两栏，不动其他资料），然后 New version 部署。
+> **2026-11 更新（留言照片 / 5 分钟改删 / 24 小时登录 / 5 秒同步）**：重贴 Code.gs 和 Core 之后，**再跑一次 setup**（只会在 comments 分页补上 `files`、`editedAt` 两栏，不动其他资料），然后 New version 部署。
 > - 登录：Google 登录后后端发一张 24 小时的通行证（签名密钥自动存在 Script Properties 的 `SESSION_SECRET`）。要强制所有人重新登录，删掉这个属性即可
-> - 同步：网页每 10 秒问一次 `sync.rev`（只读缓存，不开 Sheet），有变动才重新载入
+> - 同步：网页每 5 秒问一次 `sync.rev`（只读缓存，不开 Sheet），有变动才重新载入
 > - 留言照片存在 Drive 的同一个 Files 文件夹（`Section/项目` 子文件夹），删除留言时照片不会从 Drive 删除
 
 ## 第 3 部分：填设定、推上 GitHub

@@ -64,7 +64,7 @@ BLOCKS = [
         '**Calendar** shows deadlines by month, week or as an agenda.',
         '**Team performance** appears for section managers and super admins.',
         '**Sections** lists every section you can open. **Super admin** tools appear at the bottom for super admins.',
-        '**Help** at the bottom left opens this guide. **Refresh** loads teammates’ latest changes; the page also checks for changes every 10 seconds and updates by itself, including the messages of an open item.',
+        '**Help** at the bottom left opens this guide. **Refresh** loads teammates’ latest changes; the page also checks for changes every 5 seconds and updates by itself, including the messages of an open item.',
     ]),
     ('h2', 'The dashboard'),
     ('img', '02_dashboard', 'Dashboard: one card per section you can open, then what needs attention and your own open work.'),

@@ -317,8 +317,8 @@
     }
   }
 
-  // Every 10 s, ask the server whether anything changed (a tiny call), and reload only if it did.
-  const SYNC_MS = 10000;
+  // Every 5 s, ask the server whether anything changed (a tiny call), and reload only if it did.
+  const SYNC_MS = 5000;
   let syncing = false;
   async function syncTick() {
     if (!S.loaded || syncing || document.visibilityState !== 'visible' || S.tpl || dragId) return;
@@ -3059,7 +3059,7 @@
     render();
   });
 
-  // Pick up teammates' changes every 10 s while the tab is visible, and at once when it comes back into view
+  // Pick up teammates' changes every 5 s while the tab is visible, and at once when it comes back into view
   setInterval(syncTick, SYNC_MS);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncTick(); });
 
